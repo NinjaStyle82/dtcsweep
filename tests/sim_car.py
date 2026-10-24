@@ -32,14 +32,18 @@ def _mods():
                                  obd_stored=[], obd_permanent=[],
                                  # MIL off; misfire/fuel/components complete;
                                  # catalyst, evap, O2, O2 heater supported; evap not ready
-                                 pid01=bytes([0x00, 0x07, 0x65, 0x04])),
+                                 pid01=bytes([0x00, 0x07, 0x65, 0x04]),
+                                 # 1512 km / 3000 min since codes cleared
+                                 pids={0x31: bytes([0x05, 0xE8]), 0x4E: bytes([0x0B, 0xB8])}),
         # 29-bit OBD: brake booster's OBD face, U3001 stored + permanent
         (True, 0x18DA03F1): dict(rx=0x18DAF103, obdonly=True,
                                  obd_name=b"EBBC-ElecBrkBstCtrl",
                                  obd_stored=[b"\xF0\x01"], obd_permanent=[b"\xF0\x01"],
                                  freeze=True,
                                  # MIL on, 1 DTC, no monitors (not an engine ECU)
-                                 pid01=bytes([0x81, 0x00, 0x00, 0x00])),
+                                 pid01=bytes([0x81, 0x00, 0x00, 0x00]),
+                                 # 120 km / 95 min with the CEL on
+                                 pids={0x21: bytes([0x00, 0x78]), 0x4D: bytes([0x00, 0x5F])}),
     }
 
 
@@ -47,13 +51,15 @@ MODS = _mods()
 VIN = b"WVWZZZCDZTW000001"
 VOLTAGE_MV = 12450  # module supply voltage reported via OBD PID 42
 RPM = 0             # engine speed reported by the ECM via OBD PID 0C
+ODOMETER_X10 = 15123  # ECM odometer in 0.1 km via OBD PID A6 (None: unsupported)
 
 
 def reset():
-    global MODS, VOLTAGE_MV, RPM
+    global MODS, VOLTAGE_MV, RPM, ODOMETER_X10
     MODS = _mods()
     VOLTAGE_MV = 12450
     RPM = 0
+    ODOMETER_X10 = 15123
     SENT.clear()
 
 
@@ -65,6 +71,11 @@ def _obd(m, p):
         return bytes([0x41, 0x00, 0xBE, 0x3F, 0xA8, 0x13])
     if sid == 0x01 and len(p) > 1 and p[1] == 0x42:
         return bytes([0x41, 0x42, VOLTAGE_MV >> 8, VOLTAGE_MV & 0xFF])
+    if sid == 0x01 and len(p) > 1 and p[1] == 0xA6 and m.get("engine") \
+            and ODOMETER_X10 is not None:
+        return bytes([0x41, 0xA6]) + ODOMETER_X10.to_bytes(4, "big")
+    if sid == 0x01 and len(p) > 1 and p[1] in m.get("pids", {}):
+        return bytes([0x41, p[1]]) + m["pids"][p[1]]
     if sid == 0x01 and len(p) > 1 and p[1] == 0x0C and m.get("engine"):
         raw = int(RPM * 4)
         return bytes([0x41, 0x0C, raw >> 8, raw & 0xFF])

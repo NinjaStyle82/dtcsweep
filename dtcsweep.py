@@ -407,9 +407,9 @@ def discover_obd(bus, scheme_keys, fd, listen=1.0):
     return found
 
 
-def functional_pid(bus, scheme_keys, fd, pid, listen=0.6):
-    """Functional OBD Mode 01 request for a 2-byte PID. Returns the raw values
-    (A*256+B) from every ECU that answered."""
+def functional_pid(bus, scheme_keys, fd, pid, listen=0.6, nbytes=2):
+    """Functional OBD Mode 01 request. Returns the raw big-endian value of the
+    first `nbytes` data bytes from every ECU that answered."""
     sent = False
     if "11obd" in scheme_keys:
         safe_send(bus, raw_frame(0x7DF, False, [0x01, pid], fd))
@@ -421,10 +421,10 @@ def functional_pid(bus, scheme_keys, fd, pid, listen=0.6):
     end = time.time() + listen if sent else 0
     while time.time() < end:
         msg = bus.recv(timeout=0.05)
-        if msg is None or len(msg.data) < 5:
+        if msg is None or len(msg.data) < 3 + nbytes:
             continue
         if msg.data[1] == 0x41 and msg.data[2] == pid:
-            values.append(msg.data[3] * 256 + msg.data[4])
+            values.append(int.from_bytes(bytes(msg.data[3:3 + nbytes]), "big"))
     return values
 
 
@@ -442,6 +442,44 @@ def read_rpm(bus, scheme_keys, fd):
 
 def engine_running(rpm):
     return rpm is not None and rpm >= 300
+
+
+def read_distances(bus, scheme_keys, fd):
+    """Odometer (PID A6) and the check engine light / codes-cleared counters
+    (PIDs 21, 4D, 31, 4E). Highest reply for each; None if no ECU reports it."""
+    def top(pid, nbytes=2):
+        vals = functional_pid(bus, scheme_keys, fd, pid, nbytes=nbytes)
+        return max(vals) if vals else None
+    odo = top(0xA6, 4)
+    return {"odometer_km": odo / 10 if odo is not None else None,
+            "mil_km": top(0x21), "mil_min": top(0x4D),
+            "cleared_km": top(0x31), "cleared_min": top(0x4E)}
+
+
+def km_text(km, decimals=0):
+    return f"{km:,.{decimals}f} km ({km * 0.621371:,.{decimals}f} mi)"
+
+
+def counter_text(km, minutes):
+    parts = []
+    if km is not None:
+        parts.append(km_text(km))
+    if minutes is not None:
+        parts.append(f"{minutes:,} min")
+    return ", ".join(parts)
+
+
+def print_distances(d):
+    if d["odometer_km"] is None:
+        out(dim("  Odometer: unavailable (no ECU reports OBD PID A6)"))
+    else:
+        out(f"  Odometer: {km_text(d['odometer_km'], 1)}")
+    if d["mil_km"] is not None or d["mil_min"] is not None:
+        text = counter_text(d["mil_km"], d["mil_min"])
+        lit = bool(d["mil_km"] or d["mil_min"])
+        out(f"  Driven with check engine light on: " + (yellow(text) if lit else text))
+    if d["cleared_km"] is not None or d["cleared_min"] is not None:
+        out(f"  Since codes were last cleared: {counter_text(d['cleared_km'], d['cleared_min'])}")
 
 
 def assess_voltage(v):
@@ -943,6 +981,19 @@ def diff_main(argv):
     if "engine_rpm" in old and "engine_rpm" in new and oe != ne:
         out(yellow(f"  Note: engine {'running' if oe else 'off'} → {'running' if ne else 'off'}. "
                    "Voltage and some fault states aren't directly comparable."))
+    od, nd = old.get("distances") or {}, new.get("distances") or {}
+    a, b = od.get("odometer_km"), nd.get("odometer_km")
+    if a is not None and b is not None:
+        out(f"  Odometer: {a:,.1f} → {b:,.1f} km "
+            f"({b - a:+,.1f} km, {(b - a) * 0.621371:+,.1f} mi)")
+    for key, label, unit in (("mil_km", "Driven with check engine light on", "km"),
+                             ("mil_min", "Time with check engine light on", "min"),
+                             ("cleared_km", "Distance since codes cleared", "km"),
+                             ("cleared_min", "Time since codes cleared", "min")):
+        a, b = od.get(key), nd.get(key)
+        if a is not None and b is not None and a != b:
+            line = f"  {label}: {a:,} → {b:,} {unit}"
+            out(yellow(line + "  (codes were cleared in between)") if b < a else line)
     out()
 
     om = {(m["ext"], m["tx"]): m for m in old.get("modules", [])}
@@ -1054,6 +1105,8 @@ def main(argv=None):
                 and battery["start"] < args.min_voltage):
             out(red(f"  Below --min-voltage {args.min_voltage:.2f} V. Not scanning."))
             return
+        distances = read_distances(bus, keys, args.fd)
+        print_distances(distances)
         out()
         rule("DISCOVERY")
         found = discover(bus, keys, args.fd)
@@ -1120,7 +1173,7 @@ def main(argv=None):
 
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump({"version": __version__, "started": stamp, "fd": args.fd,
-                       "battery": battery, "engine_rpm": engine,
+                       "battery": battery, "engine_rpm": engine, "distances": distances,
                        "mask": mask, "target": target_txt, "modules": mods}, f, indent=2)
         out(dim(f"  Finished in {time.time() - started:.0f}s. "
                 f"Files: {log_path}, {json_path}"))

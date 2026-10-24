@@ -62,6 +62,18 @@ def test_diff_notes_engine_state_change(tmp_path, capsys):
     assert "engine off → running" in diff(capsys, old, new)
 
 
+def test_diff_shows_distance_driven(tmp_path, capsys):
+    old = scan_to(tmp_path / "a", capsys)
+    sim_car.ODOMETER_X10 = 15600
+    sim_car.MODS[(True, 0x18DA03F1)]["pids"][0x21] = bytes([0x00, 0xA8])  # 120 -> 168 km
+    sim_car.MODS[(True, 0x18DA01F1)]["pids"][0x31] = bytes([0x00, 0x05])  # cleared
+    new = scan_to(tmp_path / "b", capsys)
+    text = diff(capsys, old, new)
+    assert "Odometer: 1,512.3 → 1,560.0 km (+47.7 km, +29.6 mi)" in text
+    assert "Driven with check engine light on: 120 → 168 km" in text
+    assert "Distance since codes cleared: 1,512 → 5 km  (codes were cleared in between)" in text
+
+
 def test_diff_identical_scans(tmp_path, capsys):
     old = scan_to(tmp_path / "a", capsys)
     new = scan_to(tmp_path / "b", capsys)

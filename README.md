@@ -31,6 +31,7 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
 - **Failure type in plain words.** The byte after the dash (`-13`, `-87`) is decoded from the public SAE/ISO scheme, e.g. "open circuit" or "message missing", for every module.
 - **Who turned on the check engine light.** Each emissions-relevant ECU reports whether it is requesting the light (OBD Mode 01 PID 01), so the summary names the module behind it, along with emissions readiness monitor status.
 - **OBD Modes 03 / 07 / 0A** (stored, pending, permanent) for emissions-relevant ECUs, plus a **Mode 02 freeze frame** including module supply voltage.
+- **Odometer and check engine light counters.** Odometer, distance and time driven with the light on, and distance and time since codes were cleared, at the top of every scan; `diff` shows the distance driven between scans.
 - **Battery check.** Module supply voltage is read at the start and end of every scan, with a warning when it's low, and with whether the engine is running. `--min-voltage 12.2` refuses to scan below a threshold.
 - **Target hunting:** `--target U3001` flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
 - **Readable output.** Faults are color-coded by severity, there's a summary table, and a `.log` (plain text) and `.json` (all raw bytes) are written alongside.

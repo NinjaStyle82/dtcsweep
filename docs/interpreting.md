@@ -84,6 +84,18 @@ With the engine running, the alternator holds the voltage around 13.5–14.5 V, 
 
 This is the voltage *at the module*, which typically reads slightly below a meter on the battery terminals because of wiring losses. A large drop between the start and end of a short scan can point at a weak battery. Low voltage matters because modules log their own faults when supply voltage sags, which can send you chasing problems that are really the battery.
 
+## Odometer and check engine light counters
+
+Under the battery line, dtcsweep shows these readings, each only if some ECU reports it:
+
+- **Odometer** (OBD PID A6), in km and miles.
+- **Driven with check engine light on** (PIDs 21 and 4D): distance and minutes since the light came on. Zero while the light is off.
+- **Since codes were last cleared** (PIDs 31 and 4E): distance and minutes since someone (or a module, after enough clean drive cycles) last cleared emissions codes.
+
+Each value is the highest any ECU reported. The distance counters stop at 65,535 km.
+
+These make `diff` much more useful. The diff prints how far the car went between two scans, and whether the check-engine-light distance grew. A "since codes cleared" value that went *down* means codes were cleared in between. To test whether bytes in an extended data record are a mileage stamp, scan before and after a drive: a mileage stamp only changes when the fault recurs, and then it should jump to roughly the current odometer.
+
 ## Check engine light and readiness
 
 Each emissions-relevant ECU reports (OBD Mode 01 PID 01) whether it is currently requesting the check engine light, plus the status of its readiness monitors. The summary names every ECU requesting the light, which is the direct answer to "what turned my CEL on?". It's often not the engine: on the test car it was the electric brake booster.

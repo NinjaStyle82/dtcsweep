@@ -140,6 +140,24 @@ def test_engine_running_noted_with_battery(tmp_path, capsys):
     assert data["engine_rpm"]["start"] == 720
 
 
+def test_odometer_and_cel_counters(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys)
+    assert "Odometer: 1,512.3 km (939.7 mi)" in text
+    assert "Driven with check engine light on: 120 km (75 mi), 95 min" in text
+    assert "Since codes were last cleared: 1,512 km (940 mi), 3,000 min" in text
+    assert data["distances"] == {"odometer_km": 1512.3, "mil_km": 120, "mil_min": 95,
+                                 "cleared_km": 1512, "cleared_min": 3000}
+    # discovery output comes after the opening block
+    assert text.index("Odometer:") < text.index("DISCOVERY")
+
+
+def test_odometer_unavailable(tmp_path, capsys):
+    sim_car.ODOMETER_X10 = None
+    text, _, data = run(tmp_path, capsys)
+    assert "Odometer: unavailable" in text
+    assert data["distances"]["odometer_km"] is None
+
+
 def test_single_monitor_wording(tmp_path, capsys):
     sim_car.MODS[(True, 0x18DA03F1)]["pid01"] = bytes([0x81, 0x04, 0x00, 0x00])
     text, _, _ = run(tmp_path, capsys)
