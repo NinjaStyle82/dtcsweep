@@ -104,6 +104,59 @@ STATUS_BITS = [
     (0x80, "warning lamp"),
 ]
 
+# Failure type byte (the "-XX" after a DTC). The high nibble is a category;
+# common specific values follow the public SAE J2012 / ISO 14229 scheme.
+# Wording is our own. Manufacturers don't always follow it for internal codes.
+FTB_CATEGORIES = {
+    0x0: "general", 0x1: "electrical circuit", 0x2: "signal",
+    0x3: "frequency/PWM signal", 0x4: "module internal",
+    0x5: "programming/configuration", 0x6: "plausibility/algorithm",
+    0x7: "mechanical", 0x8: "bus/network message", 0x9: "component",
+    0xF: "manufacturer-specific",
+}
+FTB_TYPES = {
+    0x11: "short to ground", 0x12: "short to battery", 0x13: "open circuit",
+    0x14: "short to ground or open", 0x15: "short to battery or open",
+    0x16: "voltage too low", 0x17: "voltage too high",
+    0x18: "current too low", 0x19: "current too high",
+    0x1A: "resistance too low", 0x1B: "resistance too high",
+    0x1C: "voltage out of range", 0x1D: "current out of range",
+    0x1E: "resistance out of range", 0x1F: "intermittent circuit",
+    0x21: "signal amplitude too low", 0x22: "signal amplitude too high",
+    0x23: "signal stuck low", 0x24: "signal stuck high",
+    0x25: "signal waveform wrong", 0x26: "signal changing too slowly",
+    0x27: "signal changing too fast", 0x28: "signal offset/zero point wrong",
+    0x29: "signal invalid", 0x2A: "signal stuck in range",
+    0x2B: "signal cross-coupled", 0x2F: "signal erratic",
+    0x31: "no signal", 0x36: "signal frequency too low",
+    0x37: "signal frequency too high", 0x38: "signal frequency wrong",
+    0x41: "checksum error", 0x42: "memory error", 0x44: "data memory error",
+    0x45: "program memory error", 0x46: "calibration memory error",
+    0x47: "watchdog/safety processor error", 0x48: "supervision software error",
+    0x49: "internal electronics fault", 0x4A: "wrong component fitted",
+    0x4B: "overheated",
+    0x51: "not programmed", 0x52: "not activated", 0x53: "deactivated",
+    0x54: "calibration missing", 0x55: "not configured",
+    0x61: "signal calculation error", 0x62: "signals disagree",
+    0x63: "protection time-out", 0x64: "signal implausible",
+    0x65: "too few signal events", 0x66: "too many signal events",
+    0x67: "signal wrong after event", 0x68: "event recorded",
+    0x71: "actuator stuck", 0x72: "actuator stuck open",
+    0x73: "actuator stuck closed", 0x74: "actuator slipping",
+    0x75: "safe position not reached", 0x76: "wrong mounting position",
+    0x77: "commanded position not reached", 0x78: "alignment/adjustment wrong",
+    0x79: "mechanical linkage fault", 0x7A: "fluid leak or seal fault",
+    0x7B: "fluid level low",
+    0x81: "invalid data received", 0x82: "message counter wrong or not updating",
+    0x83: "message checksum wrong", 0x84: "value below allowed range",
+    0x85: "value above allowed range", 0x86: "value invalid",
+    0x87: "message missing", 0x88: "bus off",
+    0x91: "parameter out of spec", 0x92: "performance or wrong operation",
+    0x93: "no operation", 0x94: "unexpected operation",
+    0x95: "assembled incorrectly", 0x96: "component internal fault",
+    0x97: "operation obstructed or blocked", 0x98: "component overheated",
+}
+
 # ------------------------------------------------------------------- output
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -168,6 +221,16 @@ def parse_dtc(s):
     b1 = int(m.group(3), 16)
     ftb = int(m.group(4), 16) if m.group(4) else None
     return b0, b1, ftb
+
+
+def failure_type(ftb):
+    """Plain-language failure type for a DTC's third byte, or None for 0x00."""
+    if ftb == 0x00:
+        return None
+    if ftb in FTB_TYPES:
+        return FTB_TYPES[ftb]
+    cat = FTB_CATEGORIES.get(ftb >> 4)
+    return f"{cat} (category only)" if cat else None
 
 
 def status_labels(s):
@@ -446,7 +509,8 @@ def read_dtcs(stack, mod, mask):
             if m != 0xFF and not (s & m):
                 continue
             dtcs.append({"code": dtc_str(b), "raw": b.hex(), "status": s,
-                         "labels": status_labels(s), "severity": severity(s)})
+                         "labels": status_labels(s), "severity": severity(s),
+                         "failure_type": failure_type(b[2])})
         mod["mask_used"] = m
         mod["availability_mask"] = resp[2]
         mod["dtcs"] = dtcs
@@ -631,6 +695,8 @@ def print_module(mod, show_all):
         flag = red("  ◀ TARGET") if d.get("target") else ""
         status = dim("0x%02X" % d["status"])
         out(f"  {marker} {code} {status}  {', '.join(d['labels'])}{flag}")
+        if d.get("failure_type"):
+            out(f"      {dim('type:')} {d['failure_type']}")
         for key in ("snapshot", "extended"):
             if key in d:
                 out(f"      {dim(key + ':')} {d[key]}")
@@ -698,9 +764,10 @@ def print_summary(mods, target_txt, hits):
         if notable or obd:
             out(bold("  Faults worth attention:"))
             for mod, d in notable:
+                ft = dim(f"  [{d['failure_type']}]") if d.get("failure_type") else ""
                 out(f"    {sev_paint(d['severity'], d['code']):<9}  "
                     f"{module_title(mod)} [{fmt_id(mod['tx'], mod['ext'])}]  "
-                    f"{', '.join(d['labels'])}")
+                    f"{', '.join(d['labels'])}{ft}")
             for mod, k, v in obd:
                 out(f"    {yellow(', '.join(v))}  {module_title(mod)} "
                     f"[{fmt_id(mod['tx'], mod['ext'])}]  OBD {k}")

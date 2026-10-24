@@ -28,6 +28,7 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
   It also sends functional OBD requests on `0x7DF` and `0x18DB33F1`.
 - **Identity per module:** system name, part number, software and hardware versions. For OBD-only ECUs it uses OBD Mode 09 to get the ECU name, calibration ID and VIN.
 - **Only real faults shown.** DTCs are requested with a status mask, so the report shows codes that have actually failed, not the hundreds of supported-but-never-tested entries some modules list. `--all` shows everything.
+- **Failure type in plain words.** The byte after the dash (`-13`, `-87`) is decoded from the public SAE/ISO scheme, e.g. "open circuit" or "message missing", for every module.
 - **Who turned on the check engine light.** Each emissions-relevant ECU reports whether it is requesting the light (OBD Mode 01 PID 01), so the summary names the module behind it, along with emissions readiness monitor status.
 - **OBD Modes 03 / 07 / 0A** (stored, pending, permanent) for emissions-relevant ECUs, plus a **Mode 02 freeze frame** including module supply voltage.
 - **Battery check.** Module supply voltage is read at the start and end of every scan, with a warning when it's low. `--min-voltage 12.2` refuses to scan below a threshold.

@@ -10,6 +10,28 @@ The letter comes from the top two bits of the first byte: `P` powertrain, `C` ch
 
 To get proper descriptions for VW-internal codes, use VW-aware tools (ODIS, VCDS, OBDeleven). This project deliberately ships no VW label data.
 
+### Failure type (the part after the dash)
+
+The last byte, `-50` in `P05A2-50`, says *how* something failed. Public standards (SAE J2012 / ISO 14229) give it a structure that isn't VW-specific, so dtcsweep prints a `type:` line under each code:
+
+| First hex digit | Category |
+|---|---|
+| `0` | general (`-00` means no extra detail, so nothing is printed) |
+| `1` | electrical circuit, e.g. `-11` short to ground, `-13` open circuit |
+| `2` | signal, e.g. `-23` stuck low, `-29` invalid |
+| `3` | frequency/PWM signal |
+| `4` | module internal, e.g. `-49` internal electronics fault |
+| `5` | programming/configuration, e.g. `-54` calibration missing |
+| `6` | plausibility/algorithm, e.g. `-64` signal implausible |
+| `7` | mechanical, e.g. `-71` actuator stuck |
+| `8` | bus/network message, e.g. `-87` message missing |
+| `9` | component, e.g. `-92` performance or wrong operation |
+| `F` | manufacturer-specific |
+
+When dtcsweep knows the specific value it prints that (`short to ground`). Otherwise it prints the category with "(category only)". Treat it as a hint about the kind of fault, not a diagnosis: manufacturers don't always follow the standard for their internal codes, so a VW-internal code's failure type can mean something else. The descriptions are written in our own words.
+
+### The same fault twice
+
 The same fault can appear twice in different forms. On the test car, the electric brake booster reported `P05A2-50` over UDS and `U3001` over OBD, which was very likely the same event. Match modules by calibration ID or part number to spot this. The OBD-only address (`0x18DA03F1`, named `EBBC-ElecBrkBstCtrl`) and the UDS module (`EBKV` at `0x73B`) had matching part and software numbers.
 
 ## Status byte and severity

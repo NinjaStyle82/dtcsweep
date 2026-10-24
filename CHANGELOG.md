@@ -5,6 +5,7 @@
 - Show which ECU is requesting the check engine light, and emissions readiness monitor status (OBD Mode 01 PID 01)
 - Battery voltage check at the start and end of each scan, with `--min-voltage` to refuse low-voltage scans
 - `diff` command to compare two scans, including byte-level extended data changes
+- Failure type byte (the `-XX` after a DTC) decoded into plain words from the public SAE/ISO scheme
 - OBD-only ECUs are labelled as such instead of "read failed"
 
 ## 0.1.0

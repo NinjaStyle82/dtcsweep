@@ -63,3 +63,16 @@ def test_monitor_status_incomplete_continuous_and_diesel():
 ])
 def test_assess_voltage(volts, level):
     assert scan.assess_voltage(volts)[0] == level
+
+
+@pytest.mark.parametrize("ftb,text", [
+    (0x00, None),
+    (0x11, "short to ground"),
+    (0x87, "message missing"),
+    (0x50, "programming/configuration (category only)"),
+    (0x3C, "frequency/PWM signal (category only)"),
+    (0xF3, "manufacturer-specific (category only)"),
+    (0xB0, None),
+])
+def test_failure_type(ftb, text):
+    assert scan.failure_type(ftb) == text

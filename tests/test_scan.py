@@ -142,3 +142,11 @@ def test_min_voltage_refuses_to_scan(tmp_path, capsys):
     assert "Not scanning" in text and "DISCOVERY" not in text
     # Only the voltage request was sent; no discovery pings.
     assert {p[0] for _, _, p in sim_car.SENT} == {0x01}
+
+
+def test_failure_type_shown_and_saved(tmp_path, capsys):
+    text, log, data = run(tmp_path, capsys)
+    assert "type: programming/configuration (category only)" in text
+    assert "[programming/configuration (category only)]" in log
+    ebkv = next(m for m in data["modules"] if m["tx"] == 0x73B)
+    assert ebkv["dtcs"][0]["failure_type"] == "programming/configuration (category only)"
