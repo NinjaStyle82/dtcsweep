@@ -10,3 +10,6 @@ __pycache__/
 .venv/
 venv/
 canenv/
+
+# Personal notes for Claude Code (car details). Never commit.
+CLAUDE.local.md
