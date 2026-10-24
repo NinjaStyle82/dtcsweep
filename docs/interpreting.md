@@ -84,6 +84,14 @@ reply   DTC        status  record 01   record 06 ...
 
 The record numbers and field layouts come from VW's diagnostic database and are **not self-describing**. Common contents include an occurrence counter, a healing (aging) counter (often counting toward 40), and mileage or a timestamp. Treat any byte-level reading as a guess unless a VW-aware tool confirms it.
 
+To work out what a record means, compare scans over time with `dtcsweep.py diff`. It prints the index of every byte that changed, counting from the start of the response (byte 0 is `0x59`, bytes 2–4 are the DTC, byte 5 is its status). For example:
+
+```
+~ P05A2-50  extended  bytes [5] A8→28, [7] 02→03, [10] 28→27
+```
+
+Here byte 5 is the status (warning lamp request cleared), byte 7 went up by one when the fault recurred (an occurrence counter is a good guess), and byte 10 went down by one (a healing counter counting drive cycles is a good guess). Several scans that agree turn a guess into a finding.
+
 Many modules refuse snapshots (`19 04`) in the default diagnostic session and answer NRC `0x12`. This scanner doesn't open other sessions, to stay strictly read-only.
 
 ## Negative response codes

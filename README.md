@@ -33,6 +33,7 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
 - **Battery check.** Module supply voltage is read at the start and end of every scan, with a warning when it's low. `--min-voltage 12.2` refuses to scan below a threshold.
 - **Target hunting:** `--target U3001` flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
 - **Readable output.** Faults are color-coded by severity, there's a summary table, and a `.log` (plain text) and `.json` (all raw bytes) are written alongside.
+- **Scan diff.** `dtcsweep.py diff OLD.json NEW.json` shows what changed between two scans: new and cleared codes, status changes, check engine light and readiness changes, software updates, and byte-level changes in extended data.
 - **`--redact`** masks the VIN everywhere, for sharing logs publicly.
 
 ## Hardware
@@ -163,6 +164,16 @@ python3 dtcsweep.py --target U3001             # where is U3001 stored?
 python3 dtcsweep.py --details --redact         # full detail, safe to share
 python3 dtcsweep.py --schemes 29obd            # quick emissions-ECU check
 ```
+
+### Comparing scans
+
+```bash
+python3 dtcsweep.py diff dtcsweep-20261024-012055.json dtcsweep-20261031-090412.json
+```
+
+The diff shows modules that started or stopped answering, new and cleared codes, status changes (for example a warning-lamp request switching off), OBD stored/pending/permanent changes, check engine light and readiness changes, and software version changes (usually a sign a module was reflashed).
+
+For extended data and snapshots, it lists exactly which bytes changed. That's the main tool for working out what those records mean: scan regularly, and fields that move with the odometer, with each recurrence of a fault, or once per drive cycle reveal themselves.
 
 See [examples/sample-output.txt](examples/sample-output.txt) for real output from the test car.
 

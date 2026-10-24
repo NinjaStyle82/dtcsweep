@@ -19,8 +19,10 @@ def _mods():
         (False, 0x74C): dict(rx=0x7B6, name=b"MEM-FS", part=b"3QH959760XX",
                              toolong=True, dtcs=[(b"\xC1\x00\x00", 0x08)]),
         # 11-bit VAG: brake booster holding the target code in UDS form
-        (False, 0x73B): dict(rx=0x7A5, name=b"EBKV", part=b"5WA909059XX",
-                             dtcs=[(b"\x05\xA2\x50", 0xA8)]),
+        (False, 0x73B): dict(rx=0x7A5, name=b"EBKV", part=b"5WA909059XX", sw=b"0563",
+                             dtcs=[(b"\x05\xA2\x50", 0xA8)],
+                             # extended data after the status byte: rec 01 = 02, rec 06 = 02 28
+                             ext=bytes([0x01, 0x02, 0x06, 0x02, 0x28])),
         # 29-bit VAG: engine
         (True, 0x17FC0076): dict(rx=0x17FE0076, name=b"R4 2.0l TFS", part=b"5WA906259XX",
                                  dtcs=[(b"\x00\x72\x3C", 0x2F)]),
@@ -100,6 +102,8 @@ def respond(ext, tx, p):
             return bytes([0x62, p[1], p[2]]) + m["name"]
         if did == 0xF187:
             return bytes([0x62, p[1], p[2]]) + m["part"]
+        if did == 0xF189 and "sw" in m:
+            return bytes([0x62, p[1], p[2]]) + m["sw"]
         return bytes([0x7F, 0x22, 0x31])
     if sid == 0x19:
         sub = p[1]
@@ -112,7 +116,9 @@ def respond(ext, tx, p):
         if sub == 0x04:
             return bytes([0x7F, 0x19, 0x12])
         if sub == 0x06:
-            return bytes([0x59, 0x06]) + bytes(p[2:5]) + bytes([0xA8, 0x01, 0x02, 0x06, 0x02, 0x28])
+            status = next((s for d, s in m["dtcs"] if d == bytes(p[2:5])), 0x00)
+            ext = m.get("ext", bytes([0x01, 0x02, 0x06, 0x02, 0x28]))
+            return bytes([0x59, 0x06]) + bytes(p[2:5]) + bytes([status]) + ext
     return bytes([0x7F, sid, 0x11])
 
 

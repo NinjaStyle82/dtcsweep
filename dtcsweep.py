@@ -37,6 +37,9 @@ USEFUL OPTIONS
   --out-dir DIR    where to write the .log and .json (default: current dir)
   --no-color       plain output
 
+COMPARE TWO SCANS
+  python3 dtcsweep.py diff OLD.json NEW.json
+
 Ignition ON, engine off, battery maintainer recommended.
 """
 
@@ -716,6 +719,165 @@ def print_summary(mods, target_txt, hits):
     out()
 
 
+# ---------------------------------------------------------------------- diff
+
+def byte_changes(old_hex, new_hex):
+    """List of (index, old_byte, new_byte) where two hex strings differ."""
+    a, b = bytes.fromhex(old_hex), bytes.fromhex(new_hex)
+    changes = []
+    for i in range(max(len(a), len(b))):
+        x = a[i] if i < len(a) else None
+        y = b[i] if i < len(b) else None
+        if x != y:
+            changes.append((i, x, y))
+    return changes
+
+
+def _hx(v):
+    return "--" if v is None else f"{v:02X}"
+
+
+def _is_hex(v):
+    return isinstance(v, str) and v and not v.startswith("error") and \
+        all(c in "0123456789abcdefABCDEF" for c in v)
+
+
+def diff_module(old, new):
+    """Human-readable change lines for one module present in both scans."""
+    lines = []
+
+    # identity (a software change usually means the module was reflashed)
+    for key, label in (("sw", "Software"), ("hw", "Hardware"), ("part", "Part number")):
+        a = old.get("ident", {}).get(key, {}).get("text")
+        b = new.get("ident", {}).get(key, {}).get("text")
+        if a and b and a != b:
+            lines.append(cyan(f"~ {label} {a} → {b}"))
+
+    # UDS DTCs
+    od = {d["raw"]: d for d in old.get("dtcs", [])}
+    nd = {d["raw"]: d for d in new.get("dtcs", [])}
+    for raw in sorted(nd.keys() - od.keys()):
+        d = nd[raw]
+        lines.append(sev_paint(d["severity"], f"+ {d['code']:<9}") +
+                     f" new       0x{d['status']:02X}  {', '.join(d['labels'])}")
+    for raw in sorted(od.keys() - nd.keys()):
+        d = od[raw]
+        lines.append(green(f"- {d['code']:<9}") +
+                     f" gone      (was 0x{d['status']:02X}: {', '.join(d['labels'])})")
+    for raw in sorted(od.keys() & nd.keys()):
+        a, b = od[raw], nd[raw]
+        if a["status"] != b["status"]:
+            gained = [x for x in b["labels"] if x not in a["labels"]]
+            lost = [x for x in a["labels"] if x not in b["labels"]]
+            parts = [f"+{x}" for x in gained] + [f"-{x}" for x in lost]
+            lines.append(yellow(f"~ {b['code']:<9}") +
+                         f" status    0x{a['status']:02X} → 0x{b['status']:02X}  ({', '.join(parts)})")
+        for key in ("extended", "snapshot"):
+            x, y = a.get(key), b.get(key)
+            if x is None or y is None or x == y:
+                continue
+            if _is_hex(x) and _is_hex(y):
+                ch = ", ".join(f"[{i}] {_hx(p)}→{_hx(q)}" for i, p, q in byte_changes(x, y))
+                lines.append(yellow(f"~ {b['code']:<9}") + f" {key:<9} bytes {ch}")
+                lines.append(dim(f"              old {' '.join(x[i:i+2] for i in range(0, len(x), 2))}"))
+                lines.append(dim(f"              new {' '.join(y[i:i+2] for i in range(0, len(y), 2))}"))
+            else:
+                lines.append(yellow(f"~ {b['code']:<9}") + f" {key:<9} {x} → {y}")
+
+    # OBD lists
+    oo, no = old.get("obd_dtcs") or {}, new.get("obd_dtcs") or {}
+    for key in ("stored", "pending", "permanent"):
+        a, b = oo.get(key), no.get(key)
+        if not isinstance(a, list) or not isinstance(b, list):
+            continue
+        for c in sorted(set(b) - set(a)):
+            lines.append(red(f"+ {c:<9}") + f" OBD {key}")
+        for c in sorted(set(a) - set(b)):
+            lines.append(green(f"- {c:<9}") + f" OBD {key} (cleared)")
+
+    # check engine light and readiness
+    os_, ns = old.get("obd_status") or {}, new.get("obd_status") or {}
+    if "mil_on" in os_ and "mil_on" in ns:
+        if os_["mil_on"] != ns["mil_on"]:
+            state = red("ON") if ns["mil_on"] else green("off")
+            lines.append(f"~ CEL request {'ON' if os_['mil_on'] else 'off'} → {state}")
+        om = {m["name"]: m["complete"] for m in os_.get("monitors", [])}
+        nm = {m["name"]: m["complete"] for m in ns.get("monitors", [])}
+        for name in sorted(om.keys() & nm.keys()):
+            if om[name] != nm[name]:
+                now = green("complete") if nm[name] else yellow("not ready")
+                lines.append(f"~ Readiness {name}: {now}")
+
+    # freeze frame
+    of, nf = old.get("freeze_frame") or {}, new.get("freeze_frame") or {}
+    for label in sorted(of.keys() & nf.keys()):
+        if of[label] != nf[label]:
+            lines.append(f"~ Freeze frame {label}: {of[label]} → {nf[label]}")
+    return lines
+
+
+def diff_main(argv):
+    global _color
+    ap = argparse.ArgumentParser(
+        prog="dtcsweep.py diff",
+        description="Compare two dtcsweep JSON files and show what changed.")
+    ap.add_argument("old", help="earlier scan (.json)")
+    ap.add_argument("new", help="later scan (.json)")
+    ap.add_argument("--no-color", action="store_true")
+    args = ap.parse_args(argv)
+    if args.no_color:
+        _color = False
+    try:
+        with open(args.old, encoding="utf-8") as f:
+            old = json.load(f)
+        with open(args.new, encoding="utf-8") as f:
+            new = json.load(f)
+    except (OSError, ValueError) as e:
+        sys.exit(f"Could not read scan file: {e}")
+
+    out(bold("dtcsweep diff") + dim(f"  ·  {old.get('started', '?')} → {new.get('started', '?')}"))
+    if old.get("mask") != new.get("mask"):
+        out(yellow("  Note: the scans used different DTC masks (one used --all?), "
+                   "so some codes may appear or vanish only because of that."))
+    ob, nb = (old.get("battery") or {}).get("start"), (new.get("battery") or {}).get("start")
+    if ob is not None and nb is not None:
+        out(dim(f"  Battery at start: {ob:.2f} V → {nb:.2f} V"))
+    out()
+
+    om = {(m["ext"], m["tx"]): m for m in old.get("modules", [])}
+    nm = {(m["ext"], m["tx"]): m for m in new.get("modules", [])}
+    changed = 0
+    for key in sorted(nm.keys() - om.keys()):
+        m = nm[key]
+        out(cyan(f"+ Module now answering: {module_title(m)} [{fmt_id(m['tx'], m['ext'])}]"))
+        changed += 1
+    for key in sorted(om.keys() - nm.keys()):
+        m = om[key]
+        out(yellow(f"- Module not answering: {module_title(m)} [{fmt_id(m['tx'], m['ext'])}]"))
+        changed += 1
+    if changed:
+        out()
+    modules_changed = 0
+    for key in sorted(om.keys() & nm.keys()):
+        lines = diff_module(om[key], nm[key])
+        if not lines:
+            continue
+        m = nm[key]
+        rule(f"{module_title(m)}  [{fmt_id(m['tx'], m['ext'])}]")
+        for line in lines:
+            out("  " + line)
+        out()
+        changed += len(lines)
+        modules_changed += 1
+    if changed:
+        total = modules_changed + len(nm.keys() ^ om.keys())
+        out(bold(f"  {total} module(s) with changes."))
+        out(dim("  Byte indexes count from the start of the response (byte 0 = 0x59)."))
+    else:
+        out(green("  No changes between these scans."))
+    return 0
+
+
 # ---------------------------------------------------------------------- main
 
 def redact_vin(vin):
@@ -724,6 +886,9 @@ def redact_vin(vin):
 
 def main(argv=None):
     global _log, _color
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "diff":
+        return diff_main(argv[1:])
     ap = argparse.ArgumentParser(
         description="Read-only multi-module DTC scanner for VW Group cars (SocketCAN).")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
