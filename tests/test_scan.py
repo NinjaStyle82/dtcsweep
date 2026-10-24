@@ -81,7 +81,8 @@ def test_target_in_uds_pulls_extended_data(tmp_path, capsys):
 def test_no_target_lists_notable_faults(tmp_path, capsys):
     text, _, _ = run(tmp_path, capsys)
     assert "Faults worth attention" in text
-    assert "U3001  EBBC-ElecBrkBstCtrl [0x18DA03F1]  OBD stored" in text
+    assert "U3001  EBBC-ElecBrkBstCtrl [0x18DA03F1]  OBD stored, permanent" in text
+    assert text.count("EBBC-ElecBrkBstCtrl [0x18DA03F1]  OBD") == 1
     assert "(read failed)" not in text and "OBD-only ECU" in text
 
 

@@ -782,8 +782,14 @@ def print_summary(mods, target_txt, hits):
     if target_txt is None:
         notable = [(m, d) for m in mods for d in m.get("dtcs", [])
                    if d["severity"] in ("active", "confirmed", "pending")]
-        obd = [(m, k, v) for m in mods for k, v in (m.get("obd_dtcs") or {}).items()
-               if isinstance(v, list) and v]
+        obd = []  # (module, code, ["stored", "permanent", ...]): one line per code
+        for m in mods:
+            kinds = {}
+            for k, v in (m.get("obd_dtcs") or {}).items():
+                if isinstance(v, list):
+                    for code in v:
+                        kinds.setdefault(code, []).append(k)
+            obd += [(m, code, ks) for code, ks in kinds.items()]
         if notable or obd:
             out(bold("  Faults worth attention:"))
             for mod, d in notable:
@@ -791,9 +797,9 @@ def print_summary(mods, target_txt, hits):
                 out(f"    {sev_paint(d['severity'], d['code']):<9}  "
                     f"{module_title(mod)} [{fmt_id(mod['tx'], mod['ext'])}]  "
                     f"{', '.join(d['labels'])}{ft}")
-            for mod, k, v in obd:
-                out(f"    {yellow(', '.join(v))}  {module_title(mod)} "
-                    f"[{fmt_id(mod['tx'], mod['ext'])}]  OBD {k}")
+            for mod, code, ks in obd:
+                out(f"    {yellow(code)}  {module_title(mod)} "
+                    f"[{fmt_id(mod['tx'], mod['ext'])}]  OBD {', '.join(ks)}")
         else:
             out(green("  No active, confirmed, pending or OBD-reported faults."))
         out()
