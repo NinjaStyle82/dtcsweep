@@ -17,7 +17,10 @@ dtcsweep is a **read-only** diagnostic trouble code (DTC) scanner for VW Group c
    - OBD `0x01`, `0x02`, `0x03`, `0x07`, `0x09`, `0x0A`
 
    Never add session control (`0x10`), security access (`0x27`), clear DTCs (`0x14`), OBD clear (Mode `0x04`), writes (`0x2E`), I/O control (`0x2F`), routines (`0x31`), resets (`0x11`), or any download/upload service. `tests/test_scan.py::test_read_only_guarantee` enforces this and must keep passing. If a feature seems to need a non-read service, stop and discuss it with the maintainer instead.
-2. **No proprietary data.** No VW label files, ODX/PDX databases, VCDS/ODIS/erWin content, or descriptions copied from them. Code descriptions must be clean-room: written in our own words from observation or public standards. Any VCDS import feature must keep data local to the user (gitignored), never in the repo.
+2. **Proprietary data and third-party notes.**
+   - **Never in the repo:** VW label files, ODX/PDX databases, bulk exports, or text copied word for word from VCDS, ODIS, OBDeleven, erWin or similar tools.
+   - **Allowed in the repo:** descriptions written in our own words, including facts learned from third-party tools (e.g. "VCDS reports this as a brake booster voltage fault", summarized in our own short wording). Each entry records its source (`public standard`, `observation`, `third-party tool`), a confidence level, and how many reports back it up. Output shows the source next to the description.
+   - **Local only (gitignored):** anything imported from the user's own tool output, exact wording included (e.g. `--import-vcds`). Shown marked as `[your VCDS import]`.
 3. **Never commit scan output or personal notes.** `.log` and `.json` files contain the VIN. `.gitignore` covers `dtcsweep-*.log`, `dtcsweep-*.json` and `CLAUDE.local.md`; keep it that way. `--redact` masks the VIN for sharing.
 4. **Python 3.9 compatible.** No `match`, no backslashes inside f-string expressions, no 3.10+ typing syntax (`X | Y`). CI runs 3.9, 3.11 and 3.13.
 5. **No new runtime dependencies** beyond `python-can>=4.0` and `can-isotp>=2.0` without asking. Use the standard library otherwise.
@@ -102,7 +105,7 @@ Real-car verification is manual, by the maintainer. When a change affects on-car
 9. **Event grouping**: once extended-data mileage/timestamps are decoded, cluster faults from one event.
 10. Later: read-only DID sweep for live data, watch mode (parked only, low rate), terminal UI, DoIP.
 
-**Community data plan:** key entries by module identity (`F19E` ODX id + part number) plus DTC, since the same code number means different things in different modules. Record provenance and confidence per entry. License the data separately (CC BY 4.0). Clean-room descriptions only.
+**Community data plan:** key entries by module identity (`F19E` ODX id + part number) plus DTC, since the same code number means different things in different modules. Record provenance (source type), confidence and report count per entry. License the data separately (CC BY 4.0). Own-words descriptions only, per rule 2; facts from third-party tools are fine, their wording is not.
 
 ## Maintainer preferences
 

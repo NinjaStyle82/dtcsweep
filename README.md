@@ -227,7 +227,15 @@ pytest
 
 The simulated car lives in `tests/sim_car.py`, with minimal stand-ins for `python-can` and `can-isotp` in `tests/mocks/`. Add modules to the simulator to cover new behavior.
 
-Ground rules: keep it read-only, keep the read-only test passing, and don't add proprietary VW data (label files, ODX/PDX databases) to the repository.
+Ground rules: keep it read-only, and keep the read-only test passing.
+
+**Code descriptions and third-party tools.** Notes based on what VCDS, OBDeleven, ODIS or similar tools show are welcome, with these limits:
+
+- **Write descriptions in your own words.** Facts learned from a third-party tool are fine ("VCDS shows this as a brake booster voltage fault" becomes your own short summary). Text copied word for word from those tools is not.
+- **Say where it came from.** Each description records its source (public standard, your own observation, or a third-party tool), how confident you are, and how many reports back it up. dtcsweep shows that source next to the description.
+- **Never add proprietary data:** VW label files, ODX/PDX databases, or bulk exports from any tool.
+
+Anything imported from your own tool output (exact wording included) stays on your machine in a gitignored file and is never committed.
 
 ## License and disclaimer
 
