@@ -1,0 +1,69 @@
+# Real output from a 2026 VW Golf R (Mk8.5), trimmed to a few modules.
+# VIN redacted. Run with --target U3001. Banner and file names updated to the
+# current project name; everything else is as recorded.
+
+dtcsweep  ·  20261024-012055  ·  read-only  ·  classic CAN  ·  target U3001
+  Schemes: 11-bit VAG, 11-bit OBD, 29-bit OBD, 29-bit VAG
+
+── DISCOVERY ─────────────────────────────────────────────────────────────────
+  11-bit VAG   23 module(s)
+  11-bit OBD   0 module(s)
+  29-bit OBD   5 module(s)
+  29-bit VAG   12 module(s)
+
+── GW MQB 23  [0x710 → 0x77A, 11-bit VAG] ────────────────────────────────────
+  Part 5QS907530K  ·  SW 2097  ·  HW 5QS907530
+  ✓ no failed DTCs
+
+── ESC  [0x713 → 0x77D, 11-bit VAG] ──────────────────────────────────────────
+  Part 5WA614517EA  ·  SW 0339  ·  HW 5WA614517BS
+  ● P0022-1A  0x20  failed since clear
+
+── EBKV  [0x73B → 0x7A5, 11-bit VAG] ─────────────────────────────────────────
+  Part 5WA909059AH  ·  SW 0563  ·  HW 3Q0909059D
+  ● P05A2-50  0xA8  confirmed, failed since clear, warning lamp
+
+── R4 2.0l TFS  [0x17FC0076 → 0x17FE0076, 29-bit VAG] ────────────────────────
+  Part 5WA906259Q  ·  SW 0001  ·  HW 06K907425AA
+  ● P0072-3C  0x2F  failing now, failed this cycle, pending, confirmed, failed since clear
+
+── ECM -EngineControl  [0x18DA01F1 → 0x18DAF101, 29-bit OBD · OBD] ───────────
+  DTC read failed: NRC 0x11 serviceNotSupported
+  OBD name: ECM -EngineControl
+  Cal ID: 5WA259Q 0001BVAK5QS530K+20970143
+  VIN: WVW**************
+  OBD stored: none
+  OBD pending: none
+  OBD permanent: none
+
+── EBBC-ElecBrkBstCtrl  [0x18DA03F1 → 0x18DAF103, 29-bit OBD · OBD] ──────────
+  DTC read failed: NRC 0x11 serviceNotSupported
+  OBD name: EBBC-ElecBrkBstCtrl
+  Cal ID: 5WA059AH056310Ae
+  OBD stored: U3001
+  OBD pending: none
+  OBD permanent: U3001
+  Freeze frame 0:
+      trigger DTC                    U3001
+      module voltage                 12.10 V
+      engine rpm                     16383 rpm
+      vehicle speed                  255 km/h
+      coolant temp                   -40 °C
+      ambient temp                   n/a (NRC 0x12 subFunctionNotSupported)
+      run time since start           0 s
+      distance since codes cleared   n/a (NRC 0x12 subFunctionNotSupported)
+      time since codes cleared       n/a (NRC 0x12 subFunctionNotSupported)
+
+── SUMMARY ───────────────────────────────────────────────────────────────────
+  Address      Module                         Active  Conf  Pend  Hist
+  0x710        GW MQB 23                           0     0     0     0
+  0x713        ESC                                 0     0     0     1
+  0x73B        EBKV                                1     0     0     0
+  0x17FC0076   R4 2.0l TFS                         1     0     0     0
+  0x18DA01F1   ECM -EngineControl                  0     0     0     0 (read failed)
+  0x18DA03F1   EBBC-ElecBrkBstCtrl                 0     0     0     0 (read failed)
+
+  U3001 FOUND in 1 module(s):
+    EBBC-ElecBrkBstCtrl [0x18DA03F1]  U3001 (OBD)  (OBD stored, permanent)
+
+  Finished in 16s. Files: ./dtcsweep-20261024-012055.log, dtcsweep-20261024-012055.json

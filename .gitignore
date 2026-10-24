@@ -1,0 +1,12 @@
+# Scan output: contains your VIN and vehicle data. Never commit.
+dtcsweep-*.log
+dtcsweep-*.json
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+canenv/
