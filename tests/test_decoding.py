@@ -67,6 +67,9 @@ def test_assess_voltage(volts, level):
 
 @pytest.mark.parametrize("ftb,text", [
     (0x00, None),
+    (0x02, "signal (category only)"),
+    (0x04, "module internal (category only)"),
+    (0x0A, None),
     (0x11, "short to ground"),
     (0x87, "message missing"),
     (0x50, "programming/configuration (category only)"),

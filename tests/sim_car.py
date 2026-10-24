@@ -27,7 +27,8 @@ def _mods():
         (True, 0x17FC0076): dict(rx=0x17FE0076, name=b"R4 2.0l TFS", part=b"5WA906259XX",
                                  dtcs=[(b"\x00\x72\x3C", 0x2F)]),
         # 29-bit OBD: ECM, OBD-only, nothing stored
-        (True, 0x18DA01F1): dict(rx=0x18DAF101, obdonly=True, obd_name=b"ECM\x00-EngineControl",
+        (True, 0x18DA01F1): dict(rx=0x18DAF101, obdonly=True, engine=True,
+                                 obd_name=b"ECM\x00-EngineControl",
                                  obd_stored=[], obd_permanent=[],
                                  # MIL off; misfire/fuel/components complete;
                                  # catalyst, evap, O2, O2 heater supported; evap not ready
@@ -45,12 +46,14 @@ def _mods():
 MODS = _mods()
 VIN = b"WVWZZZCDZTW000001"
 VOLTAGE_MV = 12450  # module supply voltage reported via OBD PID 42
+RPM = 0             # engine speed reported by the ECM via OBD PID 0C
 
 
 def reset():
-    global MODS, VOLTAGE_MV
+    global MODS, VOLTAGE_MV, RPM
     MODS = _mods()
     VOLTAGE_MV = 12450
+    RPM = 0
     SENT.clear()
 
 
@@ -62,6 +65,9 @@ def _obd(m, p):
         return bytes([0x41, 0x00, 0xBE, 0x3F, 0xA8, 0x13])
     if sid == 0x01 and len(p) > 1 and p[1] == 0x42:
         return bytes([0x41, 0x42, VOLTAGE_MV >> 8, VOLTAGE_MV & 0xFF])
+    if sid == 0x01 and len(p) > 1 and p[1] == 0x0C and m.get("engine"):
+        raw = int(RPM * 4)
+        return bytes([0x41, 0x0C, raw >> 8, raw & 0xFF])
     if sid == 0x01 and len(p) > 1 and p[1] == 0x01:
         return bytes([0x41, 0x01]) + m["pid01"]
     if sid in (0x03, 0x07, 0x0A):

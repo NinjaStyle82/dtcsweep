@@ -225,10 +225,12 @@ def parse_dtc(s):
 
 def failure_type(ftb):
     """Plain-language failure type for a DTC's third byte, or None for 0x00."""
-    if ftb == 0x00:
-        return None
     if ftb in FTB_TYPES:
         return FTB_TYPES[ftb]
+    if 0x01 <= ftb <= 0x09:                 # 0x0N: general fault of category N
+        return f"{FTB_CATEGORIES[ftb]} (category only)"
+    if ftb >> 4 == 0x0:                     # 0x00 and reserved 0x0A-0x0F: no detail
+        return None
     cat = FTB_CATEGORIES.get(ftb >> 4)
     return f"{cat} (category only)" if cat else None
 
@@ -405,29 +407,41 @@ def discover_obd(bus, scheme_keys, fd, listen=1.0):
     return found
 
 
-def read_battery(bus, scheme_keys, fd, listen=0.6):
-    """Functional OBD Mode 01 PID 42 (control module voltage). Returns volts or None."""
+def functional_pid(bus, scheme_keys, fd, pid, listen=0.6):
+    """Functional OBD Mode 01 request for a 2-byte PID. Returns the raw values
+    (A*256+B) from every ECU that answered."""
     sent = False
     if "11obd" in scheme_keys:
-        safe_send(bus, raw_frame(0x7DF, False, [0x01, 0x42], fd))
+        safe_send(bus, raw_frame(0x7DF, False, [0x01, pid], fd))
         sent = True
     if "29obd" in scheme_keys:
-        safe_send(bus, raw_frame(0x18DB33F1, True, [0x01, 0x42], fd))
+        safe_send(bus, raw_frame(0x18DB33F1, True, [0x01, pid], fd))
         sent = True
-    if not sent:
-        return None
-    readings = []
-    end = time.time() + listen
+    values = []
+    end = time.time() + listen if sent else 0
     while time.time() < end:
         msg = bus.recv(timeout=0.05)
         if msg is None or len(msg.data) < 5:
             continue
-        if msg.data[1] == 0x41 and msg.data[2] == 0x42:
-            readings.append((msg.data[3] * 256 + msg.data[4]) / 1000)
-    if not readings:
-        return None
-    readings.sort()
-    return readings[len(readings) // 2]  # median across reporting ECUs
+        if msg.data[1] == 0x41 and msg.data[2] == pid:
+            values.append(msg.data[3] * 256 + msg.data[4])
+    return values
+
+
+def read_battery(bus, scheme_keys, fd):
+    """Control module voltage (PID 42), median across ECUs. Volts or None."""
+    readings = sorted(v / 1000 for v in functional_pid(bus, scheme_keys, fd, 0x42))
+    return readings[len(readings) // 2] if readings else None
+
+
+def read_rpm(bus, scheme_keys, fd):
+    """Engine speed (PID 0C), highest reply. rpm or None if no ECU reports it."""
+    readings = functional_pid(bus, scheme_keys, fd, 0x0C)
+    return max(readings) / 4 if readings else None
+
+
+def engine_running(rpm):
+    return rpm is not None and rpm >= 300
 
 
 def assess_voltage(v):
@@ -444,14 +458,21 @@ def assess_voltage(v):
     return "critical", "very low; charge the battery before scanning"
 
 
-def print_battery(v, label="Battery"):
+def print_battery(v, label="Battery", rpm=None):
+    engine = ""
+    if rpm is not None:
+        engine = dim(f"  ·  engine running ({rpm:.0f} rpm)" if engine_running(rpm)
+                     else "  ·  engine off")
     if v is None:
-        out(dim(f"  {label}: unavailable (no OBD ECU reported module voltage)"))
+        out(dim(f"  {label}: unavailable (no OBD ECU reported module voltage)") + engine)
         return
     level, advice = assess_voltage(v)
+    if engine_running(rpm):
+        level, advice = "charging", "alternator charging; battery health can't be judged"
     paint_fn = {"charging": cyan, "ok": green, "fair": yellow,
                 "low": red, "critical": red}[level]
-    out(f"  {label}: " + paint_fn(f"{v:.2f} V") + f"  {dim(advice) if level in ('ok', 'charging') else advice}")
+    out(f"  {label}: " + paint_fn(f"{v:.2f} V") +
+        f"  {dim(advice) if level in ('ok', 'charging') else advice}" + engine)
 
 
 def slow_probe(bus, scheme_keys, known, fd, timeout):
@@ -641,6 +662,8 @@ def readiness_text(st):
     not_ready = [m["name"] for m in mons if not m["complete"]]
     ready = len(mons) - len(not_ready)
     if not not_ready:
+        if ready == 1:
+            return green("the 1 supported monitor is complete")
         return green(f"all {ready} supported monitors complete")
     return f"{ready} complete, " + yellow(f"{len(not_ready)} not ready: {', '.join(not_ready)}")
 
@@ -696,7 +719,7 @@ def print_module(mod, show_all):
         status = dim("0x%02X" % d["status"])
         out(f"  {marker} {code} {status}  {', '.join(d['labels'])}{flag}")
         if d.get("failure_type"):
-            out(f"      {dim('type:')} {d['failure_type']}")
+            out(f"      {dim('type (SAE scheme, may not apply):')} {d['failure_type']}")
         for key in ("snapshot", "extended"):
             if key in d:
                 out(f"      {dim(key + ':')} {d[key]}")
@@ -909,6 +932,11 @@ def diff_main(argv):
     ob, nb = (old.get("battery") or {}).get("start"), (new.get("battery") or {}).get("start")
     if ob is not None and nb is not None:
         out(dim(f"  Battery at start: {ob:.2f} V → {nb:.2f} V"))
+    oe = engine_running((old.get("engine_rpm") or {}).get("start"))
+    ne = engine_running((new.get("engine_rpm") or {}).get("start"))
+    if "engine_rpm" in old and "engine_rpm" in new and oe != ne:
+        out(yellow(f"  Note: engine {'running' if oe else 'off'} → {'running' if ne else 'off'}. "
+                   "Voltage and some fault states aren't directly comparable."))
     out()
 
     om = {(m["ext"], m["tx"]): m for m in old.get("modules", [])}
@@ -1014,7 +1042,8 @@ def main(argv=None):
     started = time.time()
     try:
         battery = {"start": read_battery(bus, keys, args.fd)}
-        print_battery(battery["start"])
+        engine = {"start": read_rpm(bus, keys, args.fd)}
+        print_battery(battery["start"], rpm=engine["start"])
         if (args.min_voltage is not None and battery["start"] is not None
                 and battery["start"] < args.min_voltage):
             out(red(f"  Below --min-voltage {args.min_voltage:.2f} V. Not scanning."))
@@ -1075,16 +1104,17 @@ def main(argv=None):
             print_module(mod, args.all)
 
         battery["end"] = read_battery(bus, keys, args.fd)
+        engine["end"] = read_rpm(bus, keys, args.fd)
         print_summary(mods, target_txt, hits)
         if battery["end"] is not None:
-            print_battery(battery["end"], "Battery at end")
+            print_battery(battery["end"], "Battery at end", rpm=engine["end"])
             if battery["start"] is not None:
                 out(dim(f"  Change during scan: {battery['end'] - battery['start']:+.2f} V"))
             out()
 
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump({"version": __version__, "started": stamp, "fd": args.fd,
-                       "battery": battery,
+                       "battery": battery, "engine_rpm": engine,
                        "mask": mask, "target": target_txt, "modules": mods}, f, indent=2)
         out(dim(f"  Finished in {time.time() - started:.0f}s. "
                 f"Files: {log_path}, {json_path}"))

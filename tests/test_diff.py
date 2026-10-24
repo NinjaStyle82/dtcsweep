@@ -55,6 +55,13 @@ def test_diff_reports_every_kind_of_change(tmp_path, capsys):
     assert "5 module(s) with changes." in text
 
 
+def test_diff_notes_engine_state_change(tmp_path, capsys):
+    old = scan_to(tmp_path / "a", capsys)
+    sim_car.RPM = 750
+    new = scan_to(tmp_path / "b", capsys)
+    assert "engine off → running" in diff(capsys, old, new)
+
+
 def test_diff_identical_scans(tmp_path, capsys):
     old = scan_to(tmp_path / "a", capsys)
     new = scan_to(tmp_path / "b", capsys)

@@ -12,11 +12,11 @@ To get proper descriptions for VW-internal codes, use VW-aware tools (ODIS, VCDS
 
 ### Failure type (the part after the dash)
 
-The last byte, `-50` in `P05A2-50`, says *how* something failed. Public standards (SAE J2012 / ISO 14229) give it a structure that isn't VW-specific, so dtcsweep prints a `type:` line under each code:
+The last byte, `-50` in `P05A2-50`, says *how* something failed. Public standards (SAE J2012 / ISO 14229) give it a structure that isn't VW-specific, so dtcsweep prints a `type (SAE scheme, may not apply):` line under each code:
 
 | First hex digit | Category |
 |---|---|
-| `0` | general (`-00` means no extra detail, so nothing is printed) |
+| `0` | general: `-01` to `-09` mean a general fault of category 1 to 9 (`-02` general signal fault); `-00` and `-0A` to `-0F` carry no detail, so nothing is printed |
 | `1` | electrical circuit, e.g. `-11` short to ground, `-13` open circuit |
 | `2` | signal, e.g. `-23` stuck low, `-29` invalid |
 | `3` | frequency/PWM signal |
@@ -28,7 +28,7 @@ The last byte, `-50` in `P05A2-50`, says *how* something failed. Public standard
 | `9` | component, e.g. `-92` performance or wrong operation |
 | `F` | manufacturer-specific |
 
-When dtcsweep knows the specific value it prints that (`short to ground`). Otherwise it prints the category with "(category only)". Treat it as a hint about the kind of fault, not a diagnosis: manufacturers don't always follow the standard for their internal codes, so a VW-internal code's failure type can mean something else. The descriptions are written in our own words.
+When dtcsweep knows the specific value it prints that (`short to ground`). Otherwise it prints the category with "(category only)". Treat it as a hint about the kind of fault, not a diagnosis: manufacturers don't always follow the standard for their internal codes, so a VW-internal code's failure type can mean something else. On the test car, the ACC radar uses about 15 different failure types on the same `P0007` code, which suggests VW's own meanings there. The descriptions are written in our own words.
 
 ### The same fault twice
 
@@ -70,7 +70,7 @@ Non-engine modules (brakes, transmission) can be emissions-relevant and can turn
 
 ## Battery voltage
 
-dtcsweep asks the OBD ECUs for their supply voltage (OBD PID 42) at the start and end of each scan. With the engine off:
+dtcsweep asks the OBD ECUs for their supply voltage (OBD PID 42) at the start and end of each scan, and engine speed (PID 0C) to tell whether the engine is running. With the engine off:
 
 | Reading | Meaning |
 |---|---|
@@ -80,13 +80,15 @@ dtcsweep asks the OBD ECUs for their supply voltage (OBD PID 42) at the start an
 | 11.8–12.2 V | low; use a battery maintainer |
 | below 11.8 V | very low; charge before scanning |
 
+With the engine running, the alternator holds the voltage around 13.5–14.5 V, so the reading says nothing about the battery's health; dtcsweep says so. For a battery check, scan with the ignition on and the engine off.
+
 This is the voltage *at the module*, which typically reads slightly below a meter on the battery terminals because of wiring losses. A large drop between the start and end of a short scan can point at a weak battery. Low voltage matters because modules log their own faults when supply voltage sags, which can send you chasing problems that are really the battery.
 
 ## Check engine light and readiness
 
 Each emissions-relevant ECU reports (OBD Mode 01 PID 01) whether it is currently requesting the check engine light, plus the status of its readiness monitors. The summary names every ECU requesting the light, which is the direct answer to "what turned my CEL on?". It's often not the engine: on the test car it was the electric brake booster.
 
-**Readiness monitors** are the self-tests behind emissions inspections (catalyst, evaporative system, O2 sensors and so on). "Not ready" means a test hasn't finished since codes were last cleared or the battery was disconnected. That isn't a fault: monitors complete on their own over normal driving. It can matter for inspections, though, since many programs fail a car with too many monitors not ready. Non-engine ECUs usually support no monitors, which shows as "no monitors supported".
+**Readiness monitors** are the self-tests behind emissions inspections (catalyst, evaporative system, O2 sensors and so on). "Not ready" means a test hasn't finished since codes were last cleared or the battery was disconnected. That isn't a fault: monitors complete on their own over normal driving. It can matter for inspections, though, since many programs fail a car with too many monitors not ready. Non-engine ECUs often report just one monitor (on the test car, the transmission and both brake ECUs each report one), or none, which shows as "no monitors supported".
 
 ## Freeze frame (Mode 02)
 

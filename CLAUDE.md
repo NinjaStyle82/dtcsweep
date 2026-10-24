@@ -52,7 +52,7 @@ examples/sample-output.txt   trimmed real output, VIN redacted
   - `11obd`: `0x7E0`–`0x7E7`, response = request + 8
   - `29obd`: `0x18DAxxF1` → `0x18DAF1xx`
   - `29vag`: `0x17FC00xx` → `0x17FE00xx`
-- `read_battery()`: functional OBD `01 42` on `0x7DF` / `0x18DB33F1`; median of replies. Called at start and end. `--min-voltage` aborts before discovery.
+- `functional_pid()`: functional OBD Mode 01 request on `0x7DF` / `0x18DB33F1`. `read_battery()` (PID `42`, median) and `read_rpm()` (PID `0C`, highest; running at 300 rpm or more) use it at start and end; JSON keys `battery` and `engine_rpm`. `--min-voltage` aborts before discovery.
 - `discover()`: fire-and-collect raw single-frame `3E 00` to every candidate (~3 ms spacing), then listen 1 s. `discover_obd()`: functional `01 00`. `--slow`: real `19 02` probe per silent address.
 - Per module, via `make_stack()` (can-isotp 2.x: `stack.start()`, `recv(block=True, timeout=...)`, `stack.stop()`) and `uds()`, which handles NRC `0x78` (pending) and `0x21` (busy):
   - `read_identity()`: DIDs `F197`, `F187`, `F189`, `F191`, `F19E`
@@ -76,13 +76,14 @@ Real-car verification is manual, by the maintainer. When a change affects on-car
 ## Current state
 
 - **main**: v0.1.0 (initial release).
-- **feature/cel-battery-diff**: four feature commits (plus this file), awaiting a car test and PR review:
+- **feature/cel-battery-diff**: five feature commits (plus this file), awaiting a car test and PR review:
   1. Which ECU is requesting the check engine light, plus readiness (Mode 01 PID 01). OBD-only ECUs labeled instead of "read failed".
   2. Battery voltage at start and end, with `--min-voltage`.
   3. `diff` command.
-  4. Failure type byte decoding (`-XX` → plain words).
+  4. Failure type byte decoding (`-XX` → plain words), shown as a hint.
+  5. Fixes from the first car test (2026-10-24): `-01`..`-09` failure types, single-monitor wording, engine running/off with the battery reading.
 
-  The suite has 54 tests, all passing under real pytest on Python 3.13 (Windows). The first CI run (3.9/3.11/3.13) is on this branch's PR, so check it, especially 3.9.
+  The suite has 60 tests, all passing under real pytest on Python 3.13 (Windows). The first CI run (3.9/3.11/3.13) is on this branch's PR, so check it, especially 3.9.
 - `CHANGELOG.md` has an "Unreleased" section for these.
 
 ## Known limitations

@@ -126,6 +126,23 @@ def test_battery_reported_at_start_and_end(tmp_path, capsys):
     text, _, data = run(tmp_path, capsys)
     assert "Battery: 12.45 V" in text and "Battery at end: 12.45 V" in text
     assert data["battery"] == {"start": 12.45, "end": 12.45}
+    assert data["engine_rpm"] == {"start": 0, "end": 0}
+    assert "Battery: 12.45 V  healthy  ·  engine off" in text
+
+
+def test_engine_running_noted_with_battery(tmp_path, capsys):
+    sim_car.RPM = 720
+    sim_car.VOLTAGE_MV = 14100
+    text, _, data = run(tmp_path, capsys)
+    assert "engine running (720 rpm)" in text
+    assert "alternator charging; battery health can't be judged" in text
+    assert data["engine_rpm"]["start"] == 720
+
+
+def test_single_monitor_wording(tmp_path, capsys):
+    sim_car.MODS[(True, 0x18DA03F1)]["pid01"] = bytes([0x81, 0x04, 0x00, 0x00])
+    text, _, _ = run(tmp_path, capsys)
+    assert "the 1 supported monitor is complete" in text
 
 
 def test_low_battery_warns_but_scans(tmp_path, capsys):
@@ -146,7 +163,7 @@ def test_min_voltage_refuses_to_scan(tmp_path, capsys):
 
 def test_failure_type_shown_and_saved(tmp_path, capsys):
     text, log, data = run(tmp_path, capsys)
-    assert "type: programming/configuration (category only)" in text
+    assert "type (SAE scheme, may not apply): programming/configuration (category only)" in text
     assert "[programming/configuration (category only)]" in log
     ebkv = next(m for m in data["modules"] if m["tx"] == 0x73B)
     assert ebkv["dtcs"][0]["failure_type"] == "programming/configuration (category only)"
