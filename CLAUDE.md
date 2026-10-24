@@ -75,17 +75,13 @@ Real-car verification is manual, by the maintainer. When a change affects on-car
 
 ## Current state
 
-- **main**: v0.1.0 (initial release).
-- **feature/cel-battery-diff**: feature commits (plus this file), car-tested on 2026-10-24 (all features verified, engine off and running), awaiting CI and PR review:
-  1. Which ECU is requesting the check engine light, plus readiness (Mode 01 PID 01). OBD-only ECUs labeled instead of "read failed".
-  2. Battery voltage at start and end, with `--min-voltage`.
-  3. `diff` command.
-  4. Failure type byte decoding (`-XX` → plain words), shown as a hint.
-  5. Fixes from the first car test (2026-10-24): `-01`..`-09` failure types, single-monitor wording, engine running/off with the battery reading, one summary line per OBD code (stored, permanent merged).
-  6. Odometer and check engine light counters on the opening screen and in `diff` (not yet car-tested).
-
-  The suite has 63 tests, all passing under real pytest on Python 3.13 (Windows). The first CI run (3.9/3.11/3.13) is on this branch's PR, so check it, especially 3.9.
-- `CHANGELOG.md` has an "Unreleased" section for these.
+- **main**: v0.1.0 plus the "Unreleased" work, merged from `feature/cel-battery-diff` (PR #1) on 2026-10-24 after CI passed on 3.9/3.11/3.13 and a car test (engine off and running):
+  - which ECU is requesting the check engine light, readiness, OBD-only labels
+  - battery voltage and engine running/off at start and end, `--min-voltage`
+  - odometer and check engine light counters on the opening screen
+  - `diff` command (incl. odometer, engine-state note, byte-level extended data)
+  - failure type byte decoding, shown as a hint
+- The suite has 64 tests. `CHANGELOG.md` lists all of this under "Unreleased"; nothing is tagged beyond v0.1.0 yet.
 
 ## Known limitations
 

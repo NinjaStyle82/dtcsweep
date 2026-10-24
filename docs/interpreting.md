@@ -89,7 +89,7 @@ This is the voltage *at the module*, which typically reads slightly below a mete
 Under the battery line, dtcsweep shows these readings, each only if some ECU reports it:
 
 - **Odometer** (OBD PID A6), in km and miles.
-- **Driven with check engine light on** (PIDs 21 and 4D): distance and minutes since the light came on. Zero while the light is off.
+- **Driven with check engine light on** (PIDs 21 and 4D): distance and minutes since the light came on. When the light goes off, the counter keeps its last value until the light comes on again, so with the light off dtcsweep shows it as "last time it was on, it stayed on for".
 - **Since codes were last cleared** (PIDs 31 and 4E): distance and minutes since someone (or a module, after enough clean drive cycles) last cleared emissions codes.
 
 Each value is the highest any ECU reported. The distance counters stop at 65,535 km.

@@ -446,12 +446,16 @@ def engine_running(rpm):
 
 def read_distances(bus, scheme_keys, fd):
     """Odometer (PID A6) and the check engine light / codes-cleared counters
-    (PIDs 21, 4D, 31, 4E). Highest reply for each; None if no ECU reports it."""
+    (PIDs 21, 4D, 31, 4E). Highest reply for each; None if no ECU reports it.
+    Also whether any ECU requests the light right now (PID 01, bit A7), since
+    the "light on" counters keep their last value after the light goes off."""
     def top(pid, nbytes=2):
         vals = functional_pid(bus, scheme_keys, fd, pid, nbytes=nbytes)
         return max(vals) if vals else None
+    status = functional_pid(bus, scheme_keys, fd, 0x01, nbytes=1)
     odo = top(0xA6, 4)
     return {"odometer_km": odo / 10 if odo is not None else None,
+            "mil_on": any(a & 0x80 for a in status) if status else None,
             "mil_km": top(0x21), "mil_min": top(0x4D),
             "cleared_km": top(0x31), "cleared_min": top(0x4E)}
 
@@ -476,8 +480,13 @@ def print_distances(d):
         out(f"  Odometer: {km_text(d['odometer_km'], 1)}")
     if d["mil_km"] is not None or d["mil_min"] is not None:
         text = counter_text(d["mil_km"], d["mil_min"])
-        lit = bool(d["mil_km"] or d["mil_min"])
-        out(f"  Driven with check engine light on: " + (yellow(text) if lit else text))
+        mil_on = d.get("mil_on")
+        if mil_on:
+            out("  Driven with check engine light on: " + yellow(text))
+        elif mil_on is False and (d["mil_km"] or d["mil_min"]):
+            out(f"  Check engine light off; last time it was on, it stayed on for: {text}")
+        elif mil_on is None:
+            out(f"  Driven with check engine light on (now or last time): {text}")
     if d["cleared_km"] is not None or d["cleared_min"] is not None:
         out(f"  Since codes were last cleared: {counter_text(d['cleared_km'], d['cleared_min'])}")
 

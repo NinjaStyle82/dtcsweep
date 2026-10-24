@@ -145,10 +145,19 @@ def test_odometer_and_cel_counters(tmp_path, capsys):
     assert "Odometer: 1,512.3 km (939.7 mi)" in text
     assert "Driven with check engine light on: 120 km (75 mi), 95 min" in text
     assert "Since codes were last cleared: 1,512 km (940 mi), 3,000 min" in text
-    assert data["distances"] == {"odometer_km": 1512.3, "mil_km": 120, "mil_min": 95,
+    assert data["distances"] == {"odometer_km": 1512.3, "mil_on": True,
+                                 "mil_km": 120, "mil_min": 95,
                                  "cleared_km": 1512, "cleared_min": 3000}
     # discovery output comes after the opening block
     assert text.index("Odometer:") < text.index("DISCOVERY")
+
+
+def test_cel_counter_when_light_is_off(tmp_path, capsys):
+    sim_car.MODS[(True, 0x18DA03F1)]["pid01"] = bytes([0x01, 0x00, 0x00, 0x00])
+    text, _, data = run(tmp_path, capsys)
+    assert data["distances"]["mil_on"] is False
+    assert "Check engine light off; last time it was on, it stayed on for: 120 km (75 mi), 95 min" in text
+    assert "Driven with check engine light on:" not in text
 
 
 def test_odometer_unavailable(tmp_path, capsys):
