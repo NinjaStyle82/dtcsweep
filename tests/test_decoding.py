@@ -40,3 +40,19 @@ def test_status_labels():
 
 def test_printable_strips_control_bytes():
     assert scan.printable(b"ECM\x00-EngineControl\x00\x00") == "ECM -EngineControl"
+
+
+def test_monitor_status_spark():
+    st = scan.decode_monitor_status(bytes([0x83, 0x07, 0x65, 0x04]))
+    assert st["mil_on"] is True and st["dtc_count"] == 3 and st["ignition"] == "spark"
+    names = {m["name"]: m["complete"] for m in st["monitors"]}
+    assert names == {"misfire": True, "fuel system": True, "components": True,
+                     "catalyst": True, "evaporative system": False,
+                     "O2 sensor": True, "O2 sensor heater": True}
+
+
+def test_monitor_status_incomplete_continuous_and_diesel():
+    st = scan.decode_monitor_status(bytes([0x00, 0x09 | 0x10, 0x40, 0x40]))
+    names = {m["name"]: m["complete"] for m in st["monitors"]}
+    assert st["ignition"] == "compression" and st["mil_on"] is False
+    assert names == {"misfire": False, "particulate filter": False}

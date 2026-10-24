@@ -46,6 +46,12 @@ The check engine light goes off after a few fault-free drive cycles, but the sto
 
 Non-engine modules (brakes, transmission) can be emissions-relevant and can turn on the check engine light.
 
+## Check engine light and readiness
+
+Each emissions-relevant ECU reports (OBD Mode 01 PID 01) whether it is currently requesting the check engine light, plus the status of its readiness monitors. The summary names every ECU requesting the light, which is the direct answer to "what turned my CEL on?". It's often not the engine: on the test car it was the electric brake booster.
+
+**Readiness monitors** are the self-tests behind emissions inspections (catalyst, evaporative system, O2 sensors and so on). "Not ready" means a test hasn't finished since codes were last cleared or the battery was disconnected. That isn't a fault: monitors complete on their own over normal driving. It can matter for inspections, though, since many programs fail a car with too many monitors not ready. Non-engine ECUs usually support no monitors, which shows as "no monitors supported".
+
 ## Freeze frame (Mode 02)
 
 The freeze frame records values at the moment the fault was detected. Two things to know:

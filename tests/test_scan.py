@@ -81,7 +81,8 @@ def test_target_in_uds_pulls_extended_data(tmp_path, capsys):
 def test_no_target_lists_notable_faults(tmp_path, capsys):
     text, _, _ = run(tmp_path, capsys)
     assert "Faults worth attention" in text
-    assert "OBD stored: U3001" in text
+    assert "U3001  EBBC-ElecBrkBstCtrl [0x18DA03F1]  OBD stored" in text
+    assert "(read failed)" not in text and "OBD-only ECU" in text
 
 
 def test_redact_masks_vin_everywhere(tmp_path, capsys):
@@ -105,3 +106,17 @@ def test_scheme_filter(tmp_path, capsys):
 def test_log_has_no_ansi_codes(tmp_path, capsys):
     _, log, _ = run(tmp_path, capsys)
     assert "\x1b[" not in log
+
+
+def test_cel_owner_identified(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys)
+    assert "Check engine light: ON — requested by EBBC-ElecBrkBstCtrl [0x18DA03F1]" in text
+    assert "Readiness: not ready — evaporative system (ECM -EngineControl)" in text
+    ecm = next(m for m in data["modules"] if m["tx"] == 0x18DA01F1)
+    assert ecm["obd_status"]["mil_on"] is False
+
+
+def test_cel_off_when_no_ecu_requests_it(tmp_path, capsys):
+    sim_car.MODS[(True, 0x18DA03F1)]["pid01"] = bytes([0x00, 0, 0, 0])
+    text, _, _ = run(tmp_path, capsys)
+    assert "Check engine light: off" in text

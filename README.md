@@ -28,6 +28,7 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
   It also sends functional OBD requests on `0x7DF` and `0x18DB33F1`.
 - **Identity per module:** system name, part number, software and hardware versions. For OBD-only ECUs it uses OBD Mode 09 to get the ECU name, calibration ID and VIN.
 - **Only real faults shown.** DTCs are requested with a status mask, so the report shows codes that have actually failed, not the hundreds of supported-but-never-tested entries some modules list. `--all` shows everything.
+- **Who turned on the check engine light.** Each emissions-relevant ECU reports whether it is requesting the light (OBD Mode 01 PID 01), so the summary names the module behind it, along with emissions readiness monitor status.
 - **OBD Modes 03 / 07 / 0A** (stored, pending, permanent) for emissions-relevant ECUs, plus a **Mode 02 freeze frame** including module supply voltage.
 - **Target hunting:** `--target U3001` flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
 - **Readable output.** Faults are color-coded by severity, there's a summary table, and a `.log` (plain text) and `.json` (all raw bytes) are written alongside.
@@ -190,7 +191,7 @@ Read-only describes what dtcsweep *asks for*. It doesn't make physical-layer mis
 
 1. **Discovery.** It sends a raw single-frame `3E 00` to every candidate address with ~3 ms spacing, collecting replies as they arrive, then listens for one more second. It also sends functional `01 00` (supported PIDs) on both OBD IDs to find emissions ECUs.
 2. **Per module**, over ISO-TP (can-isotp 2.x), it reads identity DIDs `F197`, `F187`, `F189`, `F191` and `F19E`. Then it reads `19 02` with mask `0x2D` (failing now / pending / confirmed / failed since clear). If a module answers `responseTooLong`, the mask is narrowed automatically.
-3. **For OBD-capable ECUs**, it reads Modes 03, 07 and 0A, Mode 09 PIDs 0A, 04 and 02, and a Mode 02 freeze frame when anything is stored.
+3. **For OBD-capable ECUs**, it reads Mode 01 PID 01 (check engine light and readiness), Modes 03, 07 and 0A, Mode 09 PIDs 0A, 04 and 02, and a Mode 02 freeze frame when anything is stored.
 4. **Results** go to the terminal, a plain-text `.log`, and a `.json` with every raw response.
 
 ## Contributing

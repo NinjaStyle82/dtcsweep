@@ -412,7 +412,41 @@ def read_details(stack, dtc):
             dtc[key] = f"error: {e}"
 
 
+CONTINUOUS_MONITORS = ["misfire", "fuel system", "components"]
+SPARK_MONITORS = ["catalyst", "heated catalyst", "evaporative system", "secondary air",
+                  None, "O2 sensor", "O2 sensor heater", "EGR/VVT"]
+DIESEL_MONITORS = ["NMHC catalyst", "NOx/SCR", None, "boost pressure",
+                   None, "exhaust gas sensor", "particulate filter", "EGR/VVT"]
+
+
+def decode_monitor_status(data):
+    """Decode OBD Mode 01 PID 01 (4 bytes: A B C D)."""
+    a, b, c, d = data[:4]
+    diesel = bool(b & 0x08)
+    monitors = []
+    for i, name in enumerate(CONTINUOUS_MONITORS):
+        if b & (1 << i):
+            monitors.append({"name": name, "complete": not (b & (0x10 << i))})
+    for i, name in enumerate(DIESEL_MONITORS if diesel else SPARK_MONITORS):
+        if name and c & (1 << i):
+            monitors.append({"name": name, "complete": not (d & (1 << i))})
+    return {
+        "mil_on": bool(a & 0x80),
+        "dtc_count": a & 0x7F,
+        "ignition": "compression" if diesel else "spark",
+        "monitors": monitors,
+    }
+
+
 def read_obd(stack, mod):
+    # Mode 01 PID 01: is this ECU commanding the check engine light? Readiness?
+    try:
+        resp = uds(stack, [0x01, 0x01], timeout=2.0)
+        if len(resp) >= 6:
+            mod["obd_status"] = decode_monitor_status(resp[2:6])
+    except UdsError as e:
+        mod["obd_status"] = {"error": str(e)}
+
     res = {}
     for sid, key in ((0x03, "stored"), (0x07, "pending"), (0x0A, "permanent")):
         try:
@@ -480,6 +514,43 @@ def module_title(mod):
     return name
 
 
+def obd_only(mod):
+    return mod.get("obd") and "0x11" in mod.get("dtc_error", "")
+
+
+def readiness_text(st):
+    mons = st["monitors"]
+    if not mons:
+        return "no monitors supported"
+    not_ready = [m["name"] for m in mons if not m["complete"]]
+    ready = len(mons) - len(not_ready)
+    if not not_ready:
+        return green(f"all {ready} supported monitors complete")
+    return f"{ready} complete, " + yellow(f"{len(not_ready)} not ready: {', '.join(not_ready)}")
+
+
+def print_cel(mods):
+    """Who is turning on the check engine light, and emissions readiness."""
+    reporting = [m for m in mods if m.get("obd_status") and "error" not in m["obd_status"]]
+    if not reporting:
+        out(dim("  Check engine light: unknown (no OBD ECU reported its status)"))
+        return
+    owners = [m for m in reporting if m["obd_status"]["mil_on"]]
+    if owners:
+        names = ", ".join(f"{module_title(m)} [{fmt_id(m['tx'], m['ext'])}]" for m in owners)
+        out(red(bold("  Check engine light: ON")) + f" — requested by {names}")
+    else:
+        out(green("  Check engine light: off") + dim(f" ({len(reporting)} OBD ECU(s) reporting)"))
+    not_ready = [(m, mon["name"]) for m in reporting
+                 for mon in m["obd_status"]["monitors"] if not mon["complete"]]
+    if not_ready:
+        items = ", ".join(f"{n} ({module_title(m)})" for m, n in not_ready)
+        out(yellow(f"  Readiness: not ready — {items}"))
+    else:
+        out(green("  Readiness: all supported monitors complete"))
+    out()
+
+
 def print_module(mod, show_all):
     tx, rx = fmt_id(mod["tx"], mod["ext"]), fmt_id(mod["rx"], mod["ext"])
     tag = " · OBD" if mod["obd"] else ""
@@ -492,7 +563,9 @@ def print_module(mod, show_all):
             parts.append(f"{label} {text}")
     if parts:
         out("  " + dim("  ·  ".join(parts)))
-    if "dtc_error" in mod:
+    if obd_only(mod):
+        out("  " + dim("OBD-only ECU (no UDS DTC service); codes are in the OBD lines below"))
+    elif "dtc_error" in mod:
         out("  " + yellow(f"DTC read failed: {mod['dtc_error']}"))
     dtcs = mod.get("dtcs", [])
     if not dtcs and "dtc_error" not in mod:
@@ -515,6 +588,13 @@ def print_module(mod, show_all):
             val = info.get(key, "")
             if val and not val.startswith("error"):
                 out(f"  {dim(label + ':')} {val}")
+    st = mod.get("obd_status")
+    if st and "error" not in st:
+        if st["mil_on"]:
+            out("  " + red("CEL: ON") + " — this ECU is requesting the check engine light")
+        else:
+            out(f"  {dim('CEL:')} off")
+        out(f"  {dim('Readiness:')} {readiness_text(st)}")
     obd = mod.get("obd_dtcs")
     if obd:
         for key, val in obd.items():
@@ -551,25 +631,29 @@ def print_summary(mods, target_txt, hits):
             yellow(f"{counts['pending']:>5}") if counts["pending"] else dim(f"{0:>5}"),
             cyan(f"{counts['history']:>5}") if counts["history"] else dim(f"{0:>5}"),
         ]
-        err = yellow(" (read failed)") if "dtc_error" in mod else ""
+        if obd_only(mod):
+            err = dim(" (OBD only)")
+        else:
+            err = yellow(" (read failed)") if "dtc_error" in mod else ""
         out(f"  {addr:<12} {name:<30} {' '.join(cells)}{err}")
     out()
+    print_cel(mods)
     if target_txt is None:
         notable = [(m, d) for m in mods for d in m.get("dtcs", [])
                    if d["severity"] in ("active", "confirmed", "pending")]
-        if notable:
+        obd = [(m, k, v) for m in mods for k, v in (m.get("obd_dtcs") or {}).items()
+               if isinstance(v, list) and v]
+        if notable or obd:
             out(bold("  Faults worth attention:"))
             for mod, d in notable:
                 out(f"    {sev_paint(d['severity'], d['code']):<9}  "
                     f"{module_title(mod)} [{fmt_id(mod['tx'], mod['ext'])}]  "
                     f"{', '.join(d['labels'])}")
+            for mod, k, v in obd:
+                out(f"    {yellow(', '.join(v))}  {module_title(mod)} "
+                    f"[{fmt_id(mod['tx'], mod['ext'])}]  OBD {k}")
         else:
-            out(green("  No active, confirmed or pending faults."))
-        obd = [(m, k, v) for m in mods for k, v in (m.get("obd_dtcs") or {}).items()
-               if isinstance(v, list) and v]
-        for mod, k, v in obd:
-            out(f"    OBD {k}: {', '.join(v)}  ({module_title(mod)} "
-                f"[{fmt_id(mod['tx'], mod['ext'])}])")
+            out(green("  No active, confirmed, pending or OBD-reported faults."))
         out()
         return
     if hits:

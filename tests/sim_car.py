@@ -26,12 +26,17 @@ def _mods():
                                  dtcs=[(b"\x00\x72\x3C", 0x2F)]),
         # 29-bit OBD: ECM, OBD-only, nothing stored
         (True, 0x18DA01F1): dict(rx=0x18DAF101, obdonly=True, obd_name=b"ECM\x00-EngineControl",
-                                 obd_stored=[], obd_permanent=[]),
+                                 obd_stored=[], obd_permanent=[],
+                                 # MIL off; misfire/fuel/components complete;
+                                 # catalyst, evap, O2, O2 heater supported; evap not ready
+                                 pid01=bytes([0x00, 0x07, 0x65, 0x04])),
         # 29-bit OBD: brake booster's OBD face, U3001 stored + permanent
         (True, 0x18DA03F1): dict(rx=0x18DAF103, obdonly=True,
                                  obd_name=b"EBBC-ElecBrkBstCtrl",
                                  obd_stored=[b"\xF0\x01"], obd_permanent=[b"\xF0\x01"],
-                                 freeze=True),
+                                 freeze=True,
+                                 # MIL on, 1 DTC, no monitors (not an engine ECU)
+                                 pid01=bytes([0x81, 0x00, 0x00, 0x00])),
     }
 
 
@@ -51,6 +56,8 @@ def _obd(m, p):
         return bytes([0x7E, 0x00])
     if sid == 0x01 and len(p) > 1 and p[1] == 0x00:
         return bytes([0x41, 0x00, 0xBE, 0x3F, 0xA8, 0x13])
+    if sid == 0x01 and len(p) > 1 and p[1] == 0x01:
+        return bytes([0x41, 0x01]) + m["pid01"]
     if sid in (0x03, 0x07, 0x0A):
         codes = {0x03: m["obd_stored"], 0x07: [], 0x0A: m["obd_permanent"]}[sid]
         return bytes([sid + 0x40, len(codes)]) + b"".join(codes)
