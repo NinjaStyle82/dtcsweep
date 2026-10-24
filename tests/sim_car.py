@@ -19,29 +19,47 @@ def _mods():
         (False, 0x74C): dict(rx=0x7B6, name=b"MEM-FS", part=b"3QH959760XX",
                              toolong=True, dtcs=[(b"\xC1\x00\x00", 0x08)]),
         # 11-bit VAG: brake booster holding the target code in UDS form
-        (False, 0x73B): dict(rx=0x7A5, name=b"EBKV", part=b"5WA909059XX",
-                             dtcs=[(b"\x05\xA2\x50", 0xA8)]),
+        (False, 0x73B): dict(rx=0x7A5, name=b"EBKV", part=b"5WA909059XX", sw=b"0563",
+                             dtcs=[(b"\x05\xA2\x50", 0xA8)],
+                             # extended data after the status byte: rec 01 = 02, rec 06 = 02 28
+                             ext=bytes([0x01, 0x02, 0x06, 0x02, 0x28])),
         # 29-bit VAG: engine
         (True, 0x17FC0076): dict(rx=0x17FE0076, name=b"R4 2.0l TFS", part=b"5WA906259XX",
                                  dtcs=[(b"\x00\x72\x3C", 0x2F)]),
         # 29-bit OBD: ECM, OBD-only, nothing stored
-        (True, 0x18DA01F1): dict(rx=0x18DAF101, obdonly=True, obd_name=b"ECM\x00-EngineControl",
-                                 obd_stored=[], obd_permanent=[]),
+        (True, 0x18DA01F1): dict(rx=0x18DAF101, obdonly=True, engine=True,
+                                 obd_name=b"ECM\x00-EngineControl",
+                                 obd_stored=[], obd_permanent=[],
+                                 # MIL off; misfire/fuel/components complete;
+                                 # catalyst, evap, O2, O2 heater supported; evap not ready
+                                 pid01=bytes([0x00, 0x07, 0x65, 0x04]),
+                                 # 1512 km / 3000 min since codes cleared
+                                 pids={0x31: bytes([0x05, 0xE8]), 0x4E: bytes([0x0B, 0xB8])}),
         # 29-bit OBD: brake booster's OBD face, U3001 stored + permanent
         (True, 0x18DA03F1): dict(rx=0x18DAF103, obdonly=True,
                                  obd_name=b"EBBC-ElecBrkBstCtrl",
                                  obd_stored=[b"\xF0\x01"], obd_permanent=[b"\xF0\x01"],
-                                 freeze=True),
+                                 freeze=True,
+                                 # MIL on, 1 DTC, no monitors (not an engine ECU)
+                                 pid01=bytes([0x81, 0x00, 0x00, 0x00]),
+                                 # 120 km / 95 min with the CEL on
+                                 pids={0x21: bytes([0x00, 0x78]), 0x4D: bytes([0x00, 0x5F])}),
     }
 
 
 MODS = _mods()
 VIN = b"WVWZZZCDZTW000001"
+VOLTAGE_MV = 12450  # module supply voltage reported via OBD PID 42
+RPM = 0             # engine speed reported by the ECM via OBD PID 0C
+ODOMETER_X10 = 15123  # ECM odometer in 0.1 km via OBD PID A6 (None: unsupported)
 
 
 def reset():
-    global MODS
+    global MODS, VOLTAGE_MV, RPM, ODOMETER_X10
     MODS = _mods()
+    VOLTAGE_MV = 12450
+    RPM = 0
+    ODOMETER_X10 = 15123
     SENT.clear()
 
 
@@ -51,6 +69,18 @@ def _obd(m, p):
         return bytes([0x7E, 0x00])
     if sid == 0x01 and len(p) > 1 and p[1] == 0x00:
         return bytes([0x41, 0x00, 0xBE, 0x3F, 0xA8, 0x13])
+    if sid == 0x01 and len(p) > 1 and p[1] == 0x42:
+        return bytes([0x41, 0x42, VOLTAGE_MV >> 8, VOLTAGE_MV & 0xFF])
+    if sid == 0x01 and len(p) > 1 and p[1] == 0xA6 and m.get("engine") \
+            and ODOMETER_X10 is not None:
+        return bytes([0x41, 0xA6]) + ODOMETER_X10.to_bytes(4, "big")
+    if sid == 0x01 and len(p) > 1 and p[1] in m.get("pids", {}):
+        return bytes([0x41, p[1]]) + m["pids"][p[1]]
+    if sid == 0x01 and len(p) > 1 and p[1] == 0x0C and m.get("engine"):
+        raw = int(RPM * 4)
+        return bytes([0x41, 0x0C, raw >> 8, raw & 0xFF])
+    if sid == 0x01 and len(p) > 1 and p[1] == 0x01:
+        return bytes([0x41, 0x01]) + m["pid01"]
     if sid in (0x03, 0x07, 0x0A):
         codes = {0x03: m["obd_stored"], 0x07: [], 0x0A: m["obd_permanent"]}[sid]
         return bytes([sid + 0x40, len(codes)]) + b"".join(codes)
@@ -89,6 +119,8 @@ def respond(ext, tx, p):
             return bytes([0x62, p[1], p[2]]) + m["name"]
         if did == 0xF187:
             return bytes([0x62, p[1], p[2]]) + m["part"]
+        if did == 0xF189 and "sw" in m:
+            return bytes([0x62, p[1], p[2]]) + m["sw"]
         return bytes([0x7F, 0x22, 0x31])
     if sid == 0x19:
         sub = p[1]
@@ -101,7 +133,9 @@ def respond(ext, tx, p):
         if sub == 0x04:
             return bytes([0x7F, 0x19, 0x12])
         if sub == 0x06:
-            return bytes([0x59, 0x06]) + bytes(p[2:5]) + bytes([0xA8, 0x01, 0x02, 0x06, 0x02, 0x28])
+            status = next((s for d, s in m["dtcs"] if d == bytes(p[2:5])), 0x00)
+            ext = m.get("ext", bytes([0x01, 0x02, 0x06, 0x02, 0x28]))
+            return bytes([0x59, 0x06]) + bytes(p[2:5]) + bytes([status]) + ext
     return bytes([0x7F, sid, 0x11])
 
 

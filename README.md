@@ -28,9 +28,14 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
   It also sends functional OBD requests on `0x7DF` and `0x18DB33F1`.
 - **Identity per module:** system name, part number, software and hardware versions. For OBD-only ECUs it uses OBD Mode 09 to get the ECU name, calibration ID and VIN.
 - **Only real faults shown.** DTCs are requested with a status mask, so the report shows codes that have actually failed, not the hundreds of supported-but-never-tested entries some modules list. `--all` shows everything.
+- **Failure type in plain words.** The byte after the dash (`-13`, `-87`) is decoded from the public SAE/ISO scheme, e.g. "open circuit" or "message missing", for every module.
+- **Who turned on the check engine light.** Each emissions-relevant ECU reports whether it is requesting the light (OBD Mode 01 PID 01), so the summary names the module behind it, along with emissions readiness monitor status.
 - **OBD Modes 03 / 07 / 0A** (stored, pending, permanent) for emissions-relevant ECUs, plus a **Mode 02 freeze frame** including module supply voltage.
+- **Odometer and check engine light counters.** Odometer, distance and time driven with the light on, and distance and time since codes were cleared, at the top of every scan; `diff` shows the distance driven between scans.
+- **Battery check.** Module supply voltage is read at the start and end of every scan, with a warning when it's low, and with whether the engine is running. `--min-voltage 12.2` refuses to scan below a threshold.
 - **Target hunting:** `--target U3001` flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
 - **Readable output.** Faults are color-coded by severity, there's a summary table, and a `.log` (plain text) and `.json` (all raw bytes) are written alongside.
+- **Scan diff.** `dtcsweep.py diff OLD.json NEW.json` shows what changed between two scans: new and cleared codes, status changes, check engine light and readiness changes, software updates, and byte-level changes in extended data.
 - **`--redact`** masks the VIN everywhere, for sharing logs publicly.
 
 ## Hardware
@@ -131,7 +136,7 @@ sudo pkill slcand
 
 Then turn the ignition off and unplug the OBD connector.
 
-**Battery:** each minute of ignition-on time drains the 12 V battery. Keep sessions short, or connect a battery maintainer for longer work. Low voltage can itself cause modules to log faults.
+**Battery:** dtcsweep prints the module supply voltage at the start and end of each scan and warns when it's low. Each minute of ignition-on time drains the 12 V battery. Keep sessions short, or connect a battery maintainer for longer work. Low voltage can itself cause modules to log faults.
 
 ## Usage
 
@@ -145,6 +150,7 @@ python3 dtcsweep.py [options]
   --slow             also probe silent addresses with a real DTC request
   --probe SECONDS    timeout per --slow probe (default 0.25)
   --redact           mask the VIN in all output
+  --min-voltage V    refuse to scan if module voltage is below V (e.g. 12.2)
   --out-dir DIR      where to write the .log and .json (default: current dir)
   --fd               send CAN FD frames (needs an FD-capable adapter and firmware)
   --interface        socketcan (default) or gs_usb
@@ -160,6 +166,16 @@ python3 dtcsweep.py --target U3001             # where is U3001 stored?
 python3 dtcsweep.py --details --redact         # full detail, safe to share
 python3 dtcsweep.py --schemes 29obd            # quick emissions-ECU check
 ```
+
+### Comparing scans
+
+```bash
+python3 dtcsweep.py diff dtcsweep-20261024-012055.json dtcsweep-20261031-090412.json
+```
+
+The diff shows modules that started or stopped answering, new and cleared codes, status changes (for example a warning-lamp request switching off), OBD stored/pending/permanent changes, check engine light and readiness changes, and software version changes (usually a sign a module was reflashed).
+
+For extended data and snapshots, it lists exactly which bytes changed. That's the main tool for working out what those records mean: scan regularly, and fields that move with the odometer, with each recurrence of a fault, or once per drive cycle reveal themselves.
 
 See [examples/sample-output.txt](examples/sample-output.txt) for real output from the test car.
 
@@ -190,7 +206,7 @@ Read-only describes what dtcsweep *asks for*. It doesn't make physical-layer mis
 
 1. **Discovery.** It sends a raw single-frame `3E 00` to every candidate address with ~3 ms spacing, collecting replies as they arrive, then listens for one more second. It also sends functional `01 00` (supported PIDs) on both OBD IDs to find emissions ECUs.
 2. **Per module**, over ISO-TP (can-isotp 2.x), it reads identity DIDs `F197`, `F187`, `F189`, `F191` and `F19E`. Then it reads `19 02` with mask `0x2D` (failing now / pending / confirmed / failed since clear). If a module answers `responseTooLong`, the mask is narrowed automatically.
-3. **For OBD-capable ECUs**, it reads Modes 03, 07 and 0A, Mode 09 PIDs 0A, 04 and 02, and a Mode 02 freeze frame when anything is stored.
+3. **For OBD-capable ECUs**, it reads Mode 01 PID 01 (check engine light and readiness), Modes 03, 07 and 0A, Mode 09 PIDs 0A, 04 and 02, and a Mode 02 freeze frame when anything is stored.
 4. **Results** go to the terminal, a plain-text `.log`, and a `.json` with every raw response.
 
 ## Contributing
@@ -212,7 +228,15 @@ pytest
 
 The simulated car lives in `tests/sim_car.py`, with minimal stand-ins for `python-can` and `can-isotp` in `tests/mocks/`. Add modules to the simulator to cover new behavior.
 
-Ground rules: keep it read-only, keep the read-only test passing, and don't add proprietary VW data (label files, ODX/PDX databases) to the repository.
+Ground rules: keep it read-only, and keep the read-only test passing.
+
+**Code descriptions and third-party tools.** Notes based on what VCDS, OBDeleven, ODIS or similar tools show are welcome, with these limits:
+
+- **Write descriptions in your own words.** Facts learned from a third-party tool are fine ("VCDS shows this as a brake booster voltage fault" becomes your own short summary). Text copied word for word from those tools is not.
+- **Say where it came from.** Each description records its source (public standard, your own observation, or a third-party tool), how confident you are, and how many reports back it up. dtcsweep shows that source next to the description.
+- **Never add proprietary data:** VW label files, ODX/PDX databases, or bulk exports from any tool.
+
+Anything imported from your own tool output (exact wording included) stays on your machine in a gitignored file and is never committed.
 
 ## License and disclaimer
 

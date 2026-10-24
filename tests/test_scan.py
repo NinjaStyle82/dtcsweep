@@ -81,7 +81,9 @@ def test_target_in_uds_pulls_extended_data(tmp_path, capsys):
 def test_no_target_lists_notable_faults(tmp_path, capsys):
     text, _, _ = run(tmp_path, capsys)
     assert "Faults worth attention" in text
-    assert "OBD stored: U3001" in text
+    assert "U3001  EBBC-ElecBrkBstCtrl [0x18DA03F1]  OBD stored, permanent" in text
+    assert text.count("EBBC-ElecBrkBstCtrl [0x18DA03F1]  OBD") == 1
+    assert "(read failed)" not in text and "OBD-only ECU" in text
 
 
 def test_redact_masks_vin_everywhere(tmp_path, capsys):
@@ -105,3 +107,82 @@ def test_scheme_filter(tmp_path, capsys):
 def test_log_has_no_ansi_codes(tmp_path, capsys):
     _, log, _ = run(tmp_path, capsys)
     assert "\x1b[" not in log
+
+
+def test_cel_owner_identified(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys)
+    assert "Check engine light: ON — requested by EBBC-ElecBrkBstCtrl [0x18DA03F1]" in text
+    assert "Readiness: not ready — evaporative system (ECM -EngineControl)" in text
+    ecm = next(m for m in data["modules"] if m["tx"] == 0x18DA01F1)
+    assert ecm["obd_status"]["mil_on"] is False
+
+
+def test_cel_off_when_no_ecu_requests_it(tmp_path, capsys):
+    sim_car.MODS[(True, 0x18DA03F1)]["pid01"] = bytes([0x00, 0, 0, 0])
+    text, _, _ = run(tmp_path, capsys)
+    assert "Check engine light: off" in text
+
+
+def test_battery_reported_at_start_and_end(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys)
+    assert "Battery: 12.45 V" in text and "Battery at end: 12.45 V" in text
+    assert data["battery"] == {"start": 12.45, "end": 12.45}
+    assert data["engine_rpm"] == {"start": 0, "end": 0}
+    assert "Battery: 12.45 V  healthy  ·  engine off" in text
+
+
+def test_engine_running_noted_with_battery(tmp_path, capsys):
+    sim_car.RPM = 720
+    sim_car.VOLTAGE_MV = 14100
+    text, _, data = run(tmp_path, capsys)
+    assert "engine running (720 rpm)" in text
+    assert "alternator charging; battery health can't be judged" in text
+    assert data["engine_rpm"]["start"] == 720
+
+
+def test_odometer_and_cel_counters(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys)
+    assert "Odometer: 1,512.3 km (939.7 mi)" in text
+    assert "Driven with check engine light on: 120 km (75 mi), 95 min" in text
+    assert "Since codes were last cleared: 1,512 km (940 mi), 3,000 min" in text
+    assert data["distances"] == {"odometer_km": 1512.3, "mil_km": 120, "mil_min": 95,
+                                 "cleared_km": 1512, "cleared_min": 3000}
+    # discovery output comes after the opening block
+    assert text.index("Odometer:") < text.index("DISCOVERY")
+
+
+def test_odometer_unavailable(tmp_path, capsys):
+    sim_car.ODOMETER_X10 = None
+    text, _, data = run(tmp_path, capsys)
+    assert "Odometer: unavailable" in text
+    assert data["distances"]["odometer_km"] is None
+
+
+def test_single_monitor_wording(tmp_path, capsys):
+    sim_car.MODS[(True, 0x18DA03F1)]["pid01"] = bytes([0x81, 0x04, 0x00, 0x00])
+    text, _, _ = run(tmp_path, capsys)
+    assert "the 1 supported monitor is complete" in text
+
+
+def test_low_battery_warns_but_scans(tmp_path, capsys):
+    sim_car.VOLTAGE_MV = 11950
+    text, _, data = run(tmp_path, capsys)
+    assert "Battery: 11.95 V" in text and "battery maintainer" in text
+    assert data["modules"]
+
+
+def test_min_voltage_refuses_to_scan(tmp_path, capsys):
+    sim_car.VOLTAGE_MV = 11950
+    scan.main(["--out-dir", str(tmp_path), "--no-color", "--min-voltage", "12.2"])
+    text = capsys.readouterr().out
+    assert "Not scanning" in text and "DISCOVERY" not in text
+    # Only the voltage request was sent; no discovery pings.
+    assert {p[0] for _, _, p in sim_car.SENT} == {0x01}
+
+
+def test_failure_type_shown_and_saved(tmp_path, capsys):
+    text, log, data = run(tmp_path, capsys)
+    assert "type (SAE scheme, may not apply): programming/configuration (category only)" in text
+    assert "[programming/configuration (category only)]" in log
+    ebkv = next(m for m in data["modules"] if m["tx"] == 0x73B)
+    assert ebkv["dtcs"][0]["failure_type"] == "programming/configuration (category only)"

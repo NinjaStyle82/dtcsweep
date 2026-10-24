@@ -37,6 +37,9 @@ USEFUL OPTIONS
   --out-dir DIR    where to write the .log and .json (default: current dir)
   --no-color       plain output
 
+COMPARE TWO SCANS
+  python3 dtcsweep.py diff OLD.json NEW.json
+
 Ignition ON, engine off, battery maintainer recommended.
 """
 
@@ -100,6 +103,59 @@ STATUS_BITS = [
     (0x20, "failed since clear"), (0x40, "not tested this cycle"),
     (0x80, "warning lamp"),
 ]
+
+# Failure type byte (the "-XX" after a DTC). The high nibble is a category;
+# common specific values follow the public SAE J2012 / ISO 14229 scheme.
+# Wording is our own. Manufacturers don't always follow it for internal codes.
+FTB_CATEGORIES = {
+    0x0: "general", 0x1: "electrical circuit", 0x2: "signal",
+    0x3: "frequency/PWM signal", 0x4: "module internal",
+    0x5: "programming/configuration", 0x6: "plausibility/algorithm",
+    0x7: "mechanical", 0x8: "bus/network message", 0x9: "component",
+    0xF: "manufacturer-specific",
+}
+FTB_TYPES = {
+    0x11: "short to ground", 0x12: "short to battery", 0x13: "open circuit",
+    0x14: "short to ground or open", 0x15: "short to battery or open",
+    0x16: "voltage too low", 0x17: "voltage too high",
+    0x18: "current too low", 0x19: "current too high",
+    0x1A: "resistance too low", 0x1B: "resistance too high",
+    0x1C: "voltage out of range", 0x1D: "current out of range",
+    0x1E: "resistance out of range", 0x1F: "intermittent circuit",
+    0x21: "signal amplitude too low", 0x22: "signal amplitude too high",
+    0x23: "signal stuck low", 0x24: "signal stuck high",
+    0x25: "signal waveform wrong", 0x26: "signal changing too slowly",
+    0x27: "signal changing too fast", 0x28: "signal offset/zero point wrong",
+    0x29: "signal invalid", 0x2A: "signal stuck in range",
+    0x2B: "signal cross-coupled", 0x2F: "signal erratic",
+    0x31: "no signal", 0x36: "signal frequency too low",
+    0x37: "signal frequency too high", 0x38: "signal frequency wrong",
+    0x41: "checksum error", 0x42: "memory error", 0x44: "data memory error",
+    0x45: "program memory error", 0x46: "calibration memory error",
+    0x47: "watchdog/safety processor error", 0x48: "supervision software error",
+    0x49: "internal electronics fault", 0x4A: "wrong component fitted",
+    0x4B: "overheated",
+    0x51: "not programmed", 0x52: "not activated", 0x53: "deactivated",
+    0x54: "calibration missing", 0x55: "not configured",
+    0x61: "signal calculation error", 0x62: "signals disagree",
+    0x63: "protection time-out", 0x64: "signal implausible",
+    0x65: "too few signal events", 0x66: "too many signal events",
+    0x67: "signal wrong after event", 0x68: "event recorded",
+    0x71: "actuator stuck", 0x72: "actuator stuck open",
+    0x73: "actuator stuck closed", 0x74: "actuator slipping",
+    0x75: "safe position not reached", 0x76: "wrong mounting position",
+    0x77: "commanded position not reached", 0x78: "alignment/adjustment wrong",
+    0x79: "mechanical linkage fault", 0x7A: "fluid leak or seal fault",
+    0x7B: "fluid level low",
+    0x81: "invalid data received", 0x82: "message counter wrong or not updating",
+    0x83: "message checksum wrong", 0x84: "value below allowed range",
+    0x85: "value above allowed range", 0x86: "value invalid",
+    0x87: "message missing", 0x88: "bus off",
+    0x91: "parameter out of spec", 0x92: "performance or wrong operation",
+    0x93: "no operation", 0x94: "unexpected operation",
+    0x95: "assembled incorrectly", 0x96: "component internal fault",
+    0x97: "operation obstructed or blocked", 0x98: "component overheated",
+}
 
 # ------------------------------------------------------------------- output
 
@@ -165,6 +221,18 @@ def parse_dtc(s):
     b1 = int(m.group(3), 16)
     ftb = int(m.group(4), 16) if m.group(4) else None
     return b0, b1, ftb
+
+
+def failure_type(ftb):
+    """Plain-language failure type for a DTC's third byte, or None for 0x00."""
+    if ftb in FTB_TYPES:
+        return FTB_TYPES[ftb]
+    if 0x01 <= ftb <= 0x09:                 # 0x0N: general fault of category N
+        return f"{FTB_CATEGORIES[ftb]} (category only)"
+    if ftb >> 4 == 0x0:                     # 0x00 and reserved 0x0A-0x0F: no detail
+        return None
+    cat = FTB_CATEGORIES.get(ftb >> 4)
+    return f"{cat} (category only)" if cat else None
 
 
 def status_labels(s):
@@ -339,6 +407,112 @@ def discover_obd(bus, scheme_keys, fd, listen=1.0):
     return found
 
 
+def functional_pid(bus, scheme_keys, fd, pid, listen=0.6, nbytes=2):
+    """Functional OBD Mode 01 request. Returns the raw big-endian value of the
+    first `nbytes` data bytes from every ECU that answered."""
+    sent = False
+    if "11obd" in scheme_keys:
+        safe_send(bus, raw_frame(0x7DF, False, [0x01, pid], fd))
+        sent = True
+    if "29obd" in scheme_keys:
+        safe_send(bus, raw_frame(0x18DB33F1, True, [0x01, pid], fd))
+        sent = True
+    values = []
+    end = time.time() + listen if sent else 0
+    while time.time() < end:
+        msg = bus.recv(timeout=0.05)
+        if msg is None or len(msg.data) < 3 + nbytes:
+            continue
+        if msg.data[1] == 0x41 and msg.data[2] == pid:
+            values.append(int.from_bytes(bytes(msg.data[3:3 + nbytes]), "big"))
+    return values
+
+
+def read_battery(bus, scheme_keys, fd):
+    """Control module voltage (PID 42), median across ECUs. Volts or None."""
+    readings = sorted(v / 1000 for v in functional_pid(bus, scheme_keys, fd, 0x42))
+    return readings[len(readings) // 2] if readings else None
+
+
+def read_rpm(bus, scheme_keys, fd):
+    """Engine speed (PID 0C), highest reply. rpm or None if no ECU reports it."""
+    readings = functional_pid(bus, scheme_keys, fd, 0x0C)
+    return max(readings) / 4 if readings else None
+
+
+def engine_running(rpm):
+    return rpm is not None and rpm >= 300
+
+
+def read_distances(bus, scheme_keys, fd):
+    """Odometer (PID A6) and the check engine light / codes-cleared counters
+    (PIDs 21, 4D, 31, 4E). Highest reply for each; None if no ECU reports it."""
+    def top(pid, nbytes=2):
+        vals = functional_pid(bus, scheme_keys, fd, pid, nbytes=nbytes)
+        return max(vals) if vals else None
+    odo = top(0xA6, 4)
+    return {"odometer_km": odo / 10 if odo is not None else None,
+            "mil_km": top(0x21), "mil_min": top(0x4D),
+            "cleared_km": top(0x31), "cleared_min": top(0x4E)}
+
+
+def km_text(km, decimals=0):
+    return f"{km:,.{decimals}f} km ({km * 0.621371:,.{decimals}f} mi)"
+
+
+def counter_text(km, minutes):
+    parts = []
+    if km is not None:
+        parts.append(km_text(km))
+    if minutes is not None:
+        parts.append(f"{minutes:,} min")
+    return ", ".join(parts)
+
+
+def print_distances(d):
+    if d["odometer_km"] is None:
+        out(dim("  Odometer: unavailable (no ECU reports OBD PID A6)"))
+    else:
+        out(f"  Odometer: {km_text(d['odometer_km'], 1)}")
+    if d["mil_km"] is not None or d["mil_min"] is not None:
+        text = counter_text(d["mil_km"], d["mil_min"])
+        lit = bool(d["mil_km"] or d["mil_min"])
+        out(f"  Driven with check engine light on: " + (yellow(text) if lit else text))
+    if d["cleared_km"] is not None or d["cleared_min"] is not None:
+        out(f"  Since codes were last cleared: {counter_text(d['cleared_km'], d['cleared_min'])}")
+
+
+def assess_voltage(v):
+    """(level, advice) for a module supply voltage with the engine off."""
+    if v >= 13.2:
+        return "charging", "engine running or a charger is connected"
+    if v >= 12.4:
+        return "ok", "healthy"
+    if v >= 12.2:
+        return "fair", "partly discharged; fine for a short scan"
+    if v >= 11.8:
+        return "low", ("low; connect a battery maintainer. Low voltage can make "
+                       "modules log faults of their own")
+    return "critical", "very low; charge the battery before scanning"
+
+
+def print_battery(v, label="Battery", rpm=None):
+    engine = ""
+    if rpm is not None:
+        engine = dim(f"  ·  engine running ({rpm:.0f} rpm)" if engine_running(rpm)
+                     else "  ·  engine off")
+    if v is None:
+        out(dim(f"  {label}: unavailable (no OBD ECU reported module voltage)") + engine)
+        return
+    level, advice = assess_voltage(v)
+    if engine_running(rpm):
+        level, advice = "charging", "alternator charging; battery health can't be judged"
+    paint_fn = {"charging": cyan, "ok": green, "fair": yellow,
+                "low": red, "critical": red}[level]
+    out(f"  {label}: " + paint_fn(f"{v:.2f} V") +
+        f"  {dim(advice) if level in ('ok', 'charging') else advice}" + engine)
+
+
 def slow_probe(bus, scheme_keys, known, fd, timeout):
     """Real 19 02 request to every address that stayed silent."""
     found = {}
@@ -394,7 +568,8 @@ def read_dtcs(stack, mod, mask):
             if m != 0xFF and not (s & m):
                 continue
             dtcs.append({"code": dtc_str(b), "raw": b.hex(), "status": s,
-                         "labels": status_labels(s), "severity": severity(s)})
+                         "labels": status_labels(s), "severity": severity(s),
+                         "failure_type": failure_type(b[2])})
         mod["mask_used"] = m
         mod["availability_mask"] = resp[2]
         mod["dtcs"] = dtcs
@@ -412,7 +587,41 @@ def read_details(stack, dtc):
             dtc[key] = f"error: {e}"
 
 
+CONTINUOUS_MONITORS = ["misfire", "fuel system", "components"]
+SPARK_MONITORS = ["catalyst", "heated catalyst", "evaporative system", "secondary air",
+                  None, "O2 sensor", "O2 sensor heater", "EGR/VVT"]
+DIESEL_MONITORS = ["NMHC catalyst", "NOx/SCR", None, "boost pressure",
+                   None, "exhaust gas sensor", "particulate filter", "EGR/VVT"]
+
+
+def decode_monitor_status(data):
+    """Decode OBD Mode 01 PID 01 (4 bytes: A B C D)."""
+    a, b, c, d = data[:4]
+    diesel = bool(b & 0x08)
+    monitors = []
+    for i, name in enumerate(CONTINUOUS_MONITORS):
+        if b & (1 << i):
+            monitors.append({"name": name, "complete": not (b & (0x10 << i))})
+    for i, name in enumerate(DIESEL_MONITORS if diesel else SPARK_MONITORS):
+        if name and c & (1 << i):
+            monitors.append({"name": name, "complete": not (d & (1 << i))})
+    return {
+        "mil_on": bool(a & 0x80),
+        "dtc_count": a & 0x7F,
+        "ignition": "compression" if diesel else "spark",
+        "monitors": monitors,
+    }
+
+
 def read_obd(stack, mod):
+    # Mode 01 PID 01: is this ECU commanding the check engine light? Readiness?
+    try:
+        resp = uds(stack, [0x01, 0x01], timeout=2.0)
+        if len(resp) >= 6:
+            mod["obd_status"] = decode_monitor_status(resp[2:6])
+    except UdsError as e:
+        mod["obd_status"] = {"error": str(e)}
+
     res = {}
     for sid, key in ((0x03, "stored"), (0x07, "pending"), (0x0A, "permanent")):
         try:
@@ -480,6 +689,45 @@ def module_title(mod):
     return name
 
 
+def obd_only(mod):
+    return mod.get("obd") and "0x11" in mod.get("dtc_error", "")
+
+
+def readiness_text(st):
+    mons = st["monitors"]
+    if not mons:
+        return "no monitors supported"
+    not_ready = [m["name"] for m in mons if not m["complete"]]
+    ready = len(mons) - len(not_ready)
+    if not not_ready:
+        if ready == 1:
+            return green("the 1 supported monitor is complete")
+        return green(f"all {ready} supported monitors complete")
+    return f"{ready} complete, " + yellow(f"{len(not_ready)} not ready: {', '.join(not_ready)}")
+
+
+def print_cel(mods):
+    """Who is turning on the check engine light, and emissions readiness."""
+    reporting = [m for m in mods if m.get("obd_status") and "error" not in m["obd_status"]]
+    if not reporting:
+        out(dim("  Check engine light: unknown (no OBD ECU reported its status)"))
+        return
+    owners = [m for m in reporting if m["obd_status"]["mil_on"]]
+    if owners:
+        names = ", ".join(f"{module_title(m)} [{fmt_id(m['tx'], m['ext'])}]" for m in owners)
+        out(red(bold("  Check engine light: ON")) + f" — requested by {names}")
+    else:
+        out(green("  Check engine light: off") + dim(f" ({len(reporting)} OBD ECU(s) reporting)"))
+    not_ready = [(m, mon["name"]) for m in reporting
+                 for mon in m["obd_status"]["monitors"] if not mon["complete"]]
+    if not_ready:
+        items = ", ".join(f"{n} ({module_title(m)})" for m, n in not_ready)
+        out(yellow(f"  Readiness: not ready — {items}"))
+    else:
+        out(green("  Readiness: all supported monitors complete"))
+    out()
+
+
 def print_module(mod, show_all):
     tx, rx = fmt_id(mod["tx"], mod["ext"]), fmt_id(mod["rx"], mod["ext"])
     tag = " · OBD" if mod["obd"] else ""
@@ -492,7 +740,9 @@ def print_module(mod, show_all):
             parts.append(f"{label} {text}")
     if parts:
         out("  " + dim("  ·  ".join(parts)))
-    if "dtc_error" in mod:
+    if obd_only(mod):
+        out("  " + dim("OBD-only ECU (no UDS DTC service); codes are in the OBD lines below"))
+    elif "dtc_error" in mod:
         out("  " + yellow(f"DTC read failed: {mod['dtc_error']}"))
     dtcs = mod.get("dtcs", [])
     if not dtcs and "dtc_error" not in mod:
@@ -506,6 +756,8 @@ def print_module(mod, show_all):
         flag = red("  ◀ TARGET") if d.get("target") else ""
         status = dim("0x%02X" % d["status"])
         out(f"  {marker} {code} {status}  {', '.join(d['labels'])}{flag}")
+        if d.get("failure_type"):
+            out(f"      {dim('type (SAE scheme, may not apply):')} {d['failure_type']}")
         for key in ("snapshot", "extended"):
             if key in d:
                 out(f"      {dim(key + ':')} {d[key]}")
@@ -515,6 +767,13 @@ def print_module(mod, show_all):
             val = info.get(key, "")
             if val and not val.startswith("error"):
                 out(f"  {dim(label + ':')} {val}")
+    st = mod.get("obd_status")
+    if st and "error" not in st:
+        if st["mil_on"]:
+            out("  " + red("CEL: ON") + " — this ECU is requesting the check engine light")
+        else:
+            out(f"  {dim('CEL:')} off")
+        out(f"  {dim('Readiness:')} {readiness_text(st)}")
     obd = mod.get("obd_dtcs")
     if obd:
         for key, val in obd.items():
@@ -551,25 +810,36 @@ def print_summary(mods, target_txt, hits):
             yellow(f"{counts['pending']:>5}") if counts["pending"] else dim(f"{0:>5}"),
             cyan(f"{counts['history']:>5}") if counts["history"] else dim(f"{0:>5}"),
         ]
-        err = yellow(" (read failed)") if "dtc_error" in mod else ""
+        if obd_only(mod):
+            err = dim(" (OBD only)")
+        else:
+            err = yellow(" (read failed)") if "dtc_error" in mod else ""
         out(f"  {addr:<12} {name:<30} {' '.join(cells)}{err}")
     out()
+    print_cel(mods)
     if target_txt is None:
         notable = [(m, d) for m in mods for d in m.get("dtcs", [])
                    if d["severity"] in ("active", "confirmed", "pending")]
-        if notable:
+        obd = []  # (module, code, ["stored", "permanent", ...]): one line per code
+        for m in mods:
+            kinds = {}
+            for k, v in (m.get("obd_dtcs") or {}).items():
+                if isinstance(v, list):
+                    for code in v:
+                        kinds.setdefault(code, []).append(k)
+            obd += [(m, code, ks) for code, ks in kinds.items()]
+        if notable or obd:
             out(bold("  Faults worth attention:"))
             for mod, d in notable:
+                ft = dim(f"  [{d['failure_type']}]") if d.get("failure_type") else ""
                 out(f"    {sev_paint(d['severity'], d['code']):<9}  "
                     f"{module_title(mod)} [{fmt_id(mod['tx'], mod['ext'])}]  "
-                    f"{', '.join(d['labels'])}")
+                    f"{', '.join(d['labels'])}{ft}")
+            for mod, code, ks in obd:
+                out(f"    {yellow(code)}  {module_title(mod)} "
+                    f"[{fmt_id(mod['tx'], mod['ext'])}]  OBD {', '.join(ks)}")
         else:
-            out(green("  No active, confirmed or pending faults."))
-        obd = [(m, k, v) for m in mods for k, v in (m.get("obd_dtcs") or {}).items()
-               if isinstance(v, list) and v]
-        for mod, k, v in obd:
-            out(f"    OBD {k}: {', '.join(v)}  ({module_title(mod)} "
-                f"[{fmt_id(mod['tx'], mod['ext'])}])")
+            out(green("  No active, confirmed, pending or OBD-reported faults."))
         out()
         return
     if hits:
@@ -583,6 +853,183 @@ def print_summary(mods, target_txt, hits):
     out()
 
 
+# ---------------------------------------------------------------------- diff
+
+def byte_changes(old_hex, new_hex):
+    """List of (index, old_byte, new_byte) where two hex strings differ."""
+    a, b = bytes.fromhex(old_hex), bytes.fromhex(new_hex)
+    changes = []
+    for i in range(max(len(a), len(b))):
+        x = a[i] if i < len(a) else None
+        y = b[i] if i < len(b) else None
+        if x != y:
+            changes.append((i, x, y))
+    return changes
+
+
+def _hx(v):
+    return "--" if v is None else f"{v:02X}"
+
+
+def _is_hex(v):
+    return isinstance(v, str) and v and not v.startswith("error") and \
+        all(c in "0123456789abcdefABCDEF" for c in v)
+
+
+def diff_module(old, new):
+    """Human-readable change lines for one module present in both scans."""
+    lines = []
+
+    # identity (a software change usually means the module was reflashed)
+    for key, label in (("sw", "Software"), ("hw", "Hardware"), ("part", "Part number")):
+        a = old.get("ident", {}).get(key, {}).get("text")
+        b = new.get("ident", {}).get(key, {}).get("text")
+        if a and b and a != b:
+            lines.append(cyan(f"~ {label} {a} → {b}"))
+
+    # UDS DTCs
+    od = {d["raw"]: d for d in old.get("dtcs", [])}
+    nd = {d["raw"]: d for d in new.get("dtcs", [])}
+    for raw in sorted(nd.keys() - od.keys()):
+        d = nd[raw]
+        lines.append(sev_paint(d["severity"], f"+ {d['code']:<9}") +
+                     f" new       0x{d['status']:02X}  {', '.join(d['labels'])}")
+    for raw in sorted(od.keys() - nd.keys()):
+        d = od[raw]
+        lines.append(green(f"- {d['code']:<9}") +
+                     f" gone      (was 0x{d['status']:02X}: {', '.join(d['labels'])})")
+    for raw in sorted(od.keys() & nd.keys()):
+        a, b = od[raw], nd[raw]
+        if a["status"] != b["status"]:
+            gained = [x for x in b["labels"] if x not in a["labels"]]
+            lost = [x for x in a["labels"] if x not in b["labels"]]
+            parts = [f"+{x}" for x in gained] + [f"-{x}" for x in lost]
+            lines.append(yellow(f"~ {b['code']:<9}") +
+                         f" status    0x{a['status']:02X} → 0x{b['status']:02X}  ({', '.join(parts)})")
+        for key in ("extended", "snapshot"):
+            x, y = a.get(key), b.get(key)
+            if x is None or y is None or x == y:
+                continue
+            if _is_hex(x) and _is_hex(y):
+                ch = ", ".join(f"[{i}] {_hx(p)}→{_hx(q)}" for i, p, q in byte_changes(x, y))
+                lines.append(yellow(f"~ {b['code']:<9}") + f" {key:<9} bytes {ch}")
+                lines.append(dim(f"              old {' '.join(x[i:i+2] for i in range(0, len(x), 2))}"))
+                lines.append(dim(f"              new {' '.join(y[i:i+2] for i in range(0, len(y), 2))}"))
+            else:
+                lines.append(yellow(f"~ {b['code']:<9}") + f" {key:<9} {x} → {y}")
+
+    # OBD lists
+    oo, no = old.get("obd_dtcs") or {}, new.get("obd_dtcs") or {}
+    for key in ("stored", "pending", "permanent"):
+        a, b = oo.get(key), no.get(key)
+        if not isinstance(a, list) or not isinstance(b, list):
+            continue
+        for c in sorted(set(b) - set(a)):
+            lines.append(red(f"+ {c:<9}") + f" OBD {key}")
+        for c in sorted(set(a) - set(b)):
+            lines.append(green(f"- {c:<9}") + f" OBD {key} (cleared)")
+
+    # check engine light and readiness
+    os_, ns = old.get("obd_status") or {}, new.get("obd_status") or {}
+    if "mil_on" in os_ and "mil_on" in ns:
+        if os_["mil_on"] != ns["mil_on"]:
+            state = red("ON") if ns["mil_on"] else green("off")
+            lines.append(f"~ CEL request {'ON' if os_['mil_on'] else 'off'} → {state}")
+        om = {m["name"]: m["complete"] for m in os_.get("monitors", [])}
+        nm = {m["name"]: m["complete"] for m in ns.get("monitors", [])}
+        for name in sorted(om.keys() & nm.keys()):
+            if om[name] != nm[name]:
+                now = green("complete") if nm[name] else yellow("not ready")
+                lines.append(f"~ Readiness {name}: {now}")
+
+    # freeze frame
+    of, nf = old.get("freeze_frame") or {}, new.get("freeze_frame") or {}
+    for label in sorted(of.keys() & nf.keys()):
+        if of[label] != nf[label]:
+            lines.append(f"~ Freeze frame {label}: {of[label]} → {nf[label]}")
+    return lines
+
+
+def diff_main(argv):
+    global _color
+    ap = argparse.ArgumentParser(
+        prog="dtcsweep.py diff",
+        description="Compare two dtcsweep JSON files and show what changed.")
+    ap.add_argument("old", help="earlier scan (.json)")
+    ap.add_argument("new", help="later scan (.json)")
+    ap.add_argument("--no-color", action="store_true")
+    args = ap.parse_args(argv)
+    if args.no_color:
+        _color = False
+    try:
+        with open(args.old, encoding="utf-8") as f:
+            old = json.load(f)
+        with open(args.new, encoding="utf-8") as f:
+            new = json.load(f)
+    except (OSError, ValueError) as e:
+        sys.exit(f"Could not read scan file: {e}")
+
+    out(bold("dtcsweep diff") + dim(f"  ·  {old.get('started', '?')} → {new.get('started', '?')}"))
+    if old.get("mask") != new.get("mask"):
+        out(yellow("  Note: the scans used different DTC masks (one used --all?), "
+                   "so some codes may appear or vanish only because of that."))
+    ob, nb = (old.get("battery") or {}).get("start"), (new.get("battery") or {}).get("start")
+    if ob is not None and nb is not None:
+        out(dim(f"  Battery at start: {ob:.2f} V → {nb:.2f} V"))
+    oe = engine_running((old.get("engine_rpm") or {}).get("start"))
+    ne = engine_running((new.get("engine_rpm") or {}).get("start"))
+    if "engine_rpm" in old and "engine_rpm" in new and oe != ne:
+        out(yellow(f"  Note: engine {'running' if oe else 'off'} → {'running' if ne else 'off'}. "
+                   "Voltage and some fault states aren't directly comparable."))
+    od, nd = old.get("distances") or {}, new.get("distances") or {}
+    a, b = od.get("odometer_km"), nd.get("odometer_km")
+    if a is not None and b is not None:
+        out(f"  Odometer: {a:,.1f} → {b:,.1f} km "
+            f"({b - a:+,.1f} km, {(b - a) * 0.621371:+,.1f} mi)")
+    for key, label, unit in (("mil_km", "Driven with check engine light on", "km"),
+                             ("mil_min", "Time with check engine light on", "min"),
+                             ("cleared_km", "Distance since codes cleared", "km"),
+                             ("cleared_min", "Time since codes cleared", "min")):
+        a, b = od.get(key), nd.get(key)
+        if a is not None and b is not None and a != b:
+            line = f"  {label}: {a:,} → {b:,} {unit}"
+            out(yellow(line + "  (codes were cleared in between)") if b < a else line)
+    out()
+
+    om = {(m["ext"], m["tx"]): m for m in old.get("modules", [])}
+    nm = {(m["ext"], m["tx"]): m for m in new.get("modules", [])}
+    changed = 0
+    for key in sorted(nm.keys() - om.keys()):
+        m = nm[key]
+        out(cyan(f"+ Module now answering: {module_title(m)} [{fmt_id(m['tx'], m['ext'])}]"))
+        changed += 1
+    for key in sorted(om.keys() - nm.keys()):
+        m = om[key]
+        out(yellow(f"- Module not answering: {module_title(m)} [{fmt_id(m['tx'], m['ext'])}]"))
+        changed += 1
+    if changed:
+        out()
+    modules_changed = 0
+    for key in sorted(om.keys() & nm.keys()):
+        lines = diff_module(om[key], nm[key])
+        if not lines:
+            continue
+        m = nm[key]
+        rule(f"{module_title(m)}  [{fmt_id(m['tx'], m['ext'])}]")
+        for line in lines:
+            out("  " + line)
+        out()
+        changed += len(lines)
+        modules_changed += 1
+    if changed:
+        total = modules_changed + len(nm.keys() ^ om.keys())
+        out(bold(f"  {total} module(s) with changes."))
+        out(dim("  Byte indexes count from the start of the response (byte 0 = 0x59)."))
+    else:
+        out(green("  No changes between these scans."))
+    return 0
+
+
 # ---------------------------------------------------------------------- main
 
 def redact_vin(vin):
@@ -591,6 +1038,9 @@ def redact_vin(vin):
 
 def main(argv=None):
     global _log, _color
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "diff":
+        return diff_main(argv[1:])
     ap = argparse.ArgumentParser(
         description="Read-only multi-module DTC scanner for VW Group cars (SocketCAN).")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -607,6 +1057,8 @@ def main(argv=None):
                     help="also probe silent addresses with a real 19 02")
     ap.add_argument("--probe", type=float, default=0.25, help="timeout per --slow probe")
     ap.add_argument("--redact", action="store_true", help="mask the VIN in all output")
+    ap.add_argument("--min-voltage", type=float, default=None,
+                    help="refuse to scan if module voltage is below this (e.g. 12.0)")
     ap.add_argument("--out-dir", default=".", help="directory for .log/.json output")
     ap.add_argument("--no-color", action="store_true")
     args = ap.parse_args(argv)
@@ -646,6 +1098,16 @@ def main(argv=None):
 
     started = time.time()
     try:
+        battery = {"start": read_battery(bus, keys, args.fd)}
+        engine = {"start": read_rpm(bus, keys, args.fd)}
+        print_battery(battery["start"], rpm=engine["start"])
+        if (args.min_voltage is not None and battery["start"] is not None
+                and battery["start"] < args.min_voltage):
+            out(red(f"  Below --min-voltage {args.min_voltage:.2f} V. Not scanning."))
+            return
+        distances = read_distances(bus, keys, args.fd)
+        print_distances(distances)
+        out()
         rule("DISCOVERY")
         found = discover(bus, keys, args.fd)
         for k, mod in discover_obd(bus, keys, args.fd).items():
@@ -700,10 +1162,18 @@ def main(argv=None):
             clear_status()
             print_module(mod, args.all)
 
+        battery["end"] = read_battery(bus, keys, args.fd)
+        engine["end"] = read_rpm(bus, keys, args.fd)
         print_summary(mods, target_txt, hits)
+        if battery["end"] is not None:
+            print_battery(battery["end"], "Battery at end", rpm=engine["end"])
+            if battery["start"] is not None:
+                out(dim(f"  Change during scan: {battery['end'] - battery['start']:+.2f} V"))
+            out()
 
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump({"version": __version__, "started": stamp, "fd": args.fd,
+                       "battery": battery, "engine_rpm": engine, "distances": distances,
                        "mask": mask, "target": target_txt, "modules": mods}, f, indent=2)
         out(dim(f"  Finished in {time.time() - started:.0f}s. "
                 f"Files: {log_path}, {json_path}"))
