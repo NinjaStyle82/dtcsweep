@@ -30,6 +30,7 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
 - **Only real faults shown.** DTCs are requested with a status mask, so the report shows codes that have actually failed, not the hundreds of supported-but-never-tested entries some modules list. `--all` shows everything.
 - **Who turned on the check engine light.** Each emissions-relevant ECU reports whether it is requesting the light (OBD Mode 01 PID 01), so the summary names the module behind it, along with emissions readiness monitor status.
 - **OBD Modes 03 / 07 / 0A** (stored, pending, permanent) for emissions-relevant ECUs, plus a **Mode 02 freeze frame** including module supply voltage.
+- **Battery check.** Module supply voltage is read at the start and end of every scan, with a warning when it's low. `--min-voltage 12.2` refuses to scan below a threshold.
 - **Target hunting:** `--target U3001` flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
 - **Readable output.** Faults are color-coded by severity, there's a summary table, and a `.log` (plain text) and `.json` (all raw bytes) are written alongside.
 - **`--redact`** masks the VIN everywhere, for sharing logs publicly.
@@ -132,7 +133,7 @@ sudo pkill slcand
 
 Then turn the ignition off and unplug the OBD connector.
 
-**Battery:** each minute of ignition-on time drains the 12 V battery. Keep sessions short, or connect a battery maintainer for longer work. Low voltage can itself cause modules to log faults.
+**Battery:** dtcsweep prints the module supply voltage at the start and end of each scan and warns when it's low. Each minute of ignition-on time drains the 12 V battery. Keep sessions short, or connect a battery maintainer for longer work. Low voltage can itself cause modules to log faults.
 
 ## Usage
 
@@ -146,6 +147,7 @@ python3 dtcsweep.py [options]
   --slow             also probe silent addresses with a real DTC request
   --probe SECONDS    timeout per --slow probe (default 0.25)
   --redact           mask the VIN in all output
+  --min-voltage V    refuse to scan if module voltage is below V (e.g. 12.2)
   --out-dir DIR      where to write the .log and .json (default: current dir)
   --fd               send CAN FD frames (needs an FD-capable adapter and firmware)
   --interface        socketcan (default) or gs_usb

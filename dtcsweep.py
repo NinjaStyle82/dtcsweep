@@ -339,6 +339,55 @@ def discover_obd(bus, scheme_keys, fd, listen=1.0):
     return found
 
 
+def read_battery(bus, scheme_keys, fd, listen=0.6):
+    """Functional OBD Mode 01 PID 42 (control module voltage). Returns volts or None."""
+    sent = False
+    if "11obd" in scheme_keys:
+        safe_send(bus, raw_frame(0x7DF, False, [0x01, 0x42], fd))
+        sent = True
+    if "29obd" in scheme_keys:
+        safe_send(bus, raw_frame(0x18DB33F1, True, [0x01, 0x42], fd))
+        sent = True
+    if not sent:
+        return None
+    readings = []
+    end = time.time() + listen
+    while time.time() < end:
+        msg = bus.recv(timeout=0.05)
+        if msg is None or len(msg.data) < 5:
+            continue
+        if msg.data[1] == 0x41 and msg.data[2] == 0x42:
+            readings.append((msg.data[3] * 256 + msg.data[4]) / 1000)
+    if not readings:
+        return None
+    readings.sort()
+    return readings[len(readings) // 2]  # median across reporting ECUs
+
+
+def assess_voltage(v):
+    """(level, advice) for a module supply voltage with the engine off."""
+    if v >= 13.2:
+        return "charging", "engine running or a charger is connected"
+    if v >= 12.4:
+        return "ok", "healthy"
+    if v >= 12.2:
+        return "fair", "partly discharged; fine for a short scan"
+    if v >= 11.8:
+        return "low", ("low; connect a battery maintainer. Low voltage can make "
+                       "modules log faults of their own")
+    return "critical", "very low; charge the battery before scanning"
+
+
+def print_battery(v, label="Battery"):
+    if v is None:
+        out(dim(f"  {label}: unavailable (no OBD ECU reported module voltage)"))
+        return
+    level, advice = assess_voltage(v)
+    paint_fn = {"charging": cyan, "ok": green, "fair": yellow,
+                "low": red, "critical": red}[level]
+    out(f"  {label}: " + paint_fn(f"{v:.2f} V") + f"  {dim(advice) if level in ('ok', 'charging') else advice}")
+
+
 def slow_probe(bus, scheme_keys, known, fd, timeout):
     """Real 19 02 request to every address that stayed silent."""
     found = {}
@@ -691,6 +740,8 @@ def main(argv=None):
                     help="also probe silent addresses with a real 19 02")
     ap.add_argument("--probe", type=float, default=0.25, help="timeout per --slow probe")
     ap.add_argument("--redact", action="store_true", help="mask the VIN in all output")
+    ap.add_argument("--min-voltage", type=float, default=None,
+                    help="refuse to scan if module voltage is below this (e.g. 12.0)")
     ap.add_argument("--out-dir", default=".", help="directory for .log/.json output")
     ap.add_argument("--no-color", action="store_true")
     args = ap.parse_args(argv)
@@ -730,6 +781,13 @@ def main(argv=None):
 
     started = time.time()
     try:
+        battery = {"start": read_battery(bus, keys, args.fd)}
+        print_battery(battery["start"])
+        if (args.min_voltage is not None and battery["start"] is not None
+                and battery["start"] < args.min_voltage):
+            out(red(f"  Below --min-voltage {args.min_voltage:.2f} V. Not scanning."))
+            return
+        out()
         rule("DISCOVERY")
         found = discover(bus, keys, args.fd)
         for k, mod in discover_obd(bus, keys, args.fd).items():
@@ -784,10 +842,17 @@ def main(argv=None):
             clear_status()
             print_module(mod, args.all)
 
+        battery["end"] = read_battery(bus, keys, args.fd)
         print_summary(mods, target_txt, hits)
+        if battery["end"] is not None:
+            print_battery(battery["end"], "Battery at end")
+            if battery["start"] is not None:
+                out(dim(f"  Change during scan: {battery['end'] - battery['start']:+.2f} V"))
+            out()
 
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump({"version": __version__, "started": stamp, "fd": args.fd,
+                       "battery": battery,
                        "mask": mask, "target": target_txt, "modules": mods}, f, indent=2)
         out(dim(f"  Finished in {time.time() - started:.0f}s. "
                 f"Files: {log_path}, {json_path}"))

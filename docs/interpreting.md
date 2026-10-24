@@ -46,6 +46,20 @@ The check engine light goes off after a few fault-free drive cycles, but the sto
 
 Non-engine modules (brakes, transmission) can be emissions-relevant and can turn on the check engine light.
 
+## Battery voltage
+
+dtcsweep asks the OBD ECUs for their supply voltage (OBD PID 42) at the start and end of each scan. With the engine off:
+
+| Reading | Meaning |
+|---|---|
+| 13.2 V and up | engine running or a charger connected |
+| 12.4 V and up | healthy |
+| 12.2–12.4 V | partly discharged; fine for a short scan |
+| 11.8–12.2 V | low; use a battery maintainer |
+| below 11.8 V | very low; charge before scanning |
+
+This is the voltage *at the module*, which typically reads slightly below a meter on the battery terminals because of wiring losses. A large drop between the start and end of a short scan can point at a weak battery. Low voltage matters because modules log their own faults when supply voltage sags, which can send you chasing problems that are really the battery.
+
 ## Check engine light and readiness
 
 Each emissions-relevant ECU reports (OBD Mode 01 PID 01) whether it is currently requesting the check engine light, plus the status of its readiness monitors. The summary names every ECU requesting the light, which is the direct answer to "what turned my CEL on?". It's often not the engine: on the test car it was the electric brake booster.

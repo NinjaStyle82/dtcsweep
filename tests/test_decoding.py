@@ -56,3 +56,10 @@ def test_monitor_status_incomplete_continuous_and_diesel():
     names = {m["name"]: m["complete"] for m in st["monitors"]}
     assert st["ignition"] == "compression" and st["mil_on"] is False
     assert names == {"misfire": False, "particulate filter": False}
+
+
+@pytest.mark.parametrize("volts,level", [
+    (14.1, "charging"), (12.6, "ok"), (12.3, "fair"), (12.0, "low"), (11.5, "critical"),
+])
+def test_assess_voltage(volts, level):
+    assert scan.assess_voltage(volts)[0] == level

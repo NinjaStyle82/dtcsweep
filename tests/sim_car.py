@@ -42,11 +42,13 @@ def _mods():
 
 MODS = _mods()
 VIN = b"WVWZZZCDZTW000001"
+VOLTAGE_MV = 12450  # module supply voltage reported via OBD PID 42
 
 
 def reset():
-    global MODS
+    global MODS, VOLTAGE_MV
     MODS = _mods()
+    VOLTAGE_MV = 12450
     SENT.clear()
 
 
@@ -56,6 +58,8 @@ def _obd(m, p):
         return bytes([0x7E, 0x00])
     if sid == 0x01 and len(p) > 1 and p[1] == 0x00:
         return bytes([0x41, 0x00, 0xBE, 0x3F, 0xA8, 0x13])
+    if sid == 0x01 and len(p) > 1 and p[1] == 0x42:
+        return bytes([0x41, 0x42, VOLTAGE_MV >> 8, VOLTAGE_MV & 0xFF])
     if sid == 0x01 and len(p) > 1 and p[1] == 0x01:
         return bytes([0x41, 0x01]) + m["pid01"]
     if sid in (0x03, 0x07, 0x0A):

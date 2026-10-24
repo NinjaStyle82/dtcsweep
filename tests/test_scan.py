@@ -120,3 +120,25 @@ def test_cel_off_when_no_ecu_requests_it(tmp_path, capsys):
     sim_car.MODS[(True, 0x18DA03F1)]["pid01"] = bytes([0x00, 0, 0, 0])
     text, _, _ = run(tmp_path, capsys)
     assert "Check engine light: off" in text
+
+
+def test_battery_reported_at_start_and_end(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys)
+    assert "Battery: 12.45 V" in text and "Battery at end: 12.45 V" in text
+    assert data["battery"] == {"start": 12.45, "end": 12.45}
+
+
+def test_low_battery_warns_but_scans(tmp_path, capsys):
+    sim_car.VOLTAGE_MV = 11950
+    text, _, data = run(tmp_path, capsys)
+    assert "Battery: 11.95 V" in text and "battery maintainer" in text
+    assert data["modules"]
+
+
+def test_min_voltage_refuses_to_scan(tmp_path, capsys):
+    sim_car.VOLTAGE_MV = 11950
+    scan.main(["--out-dir", str(tmp_path), "--no-color", "--min-voltage", "12.2"])
+    text = capsys.readouterr().out
+    assert "Not scanning" in text and "DISCOVERY" not in text
+    # Only the voltage request was sent; no discovery pings.
+    assert {p[0] for _, _, p in sim_car.SENT} == {0x01}
