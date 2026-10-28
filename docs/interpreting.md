@@ -10,7 +10,7 @@ Each UDS DTC from a VW module is 3 bytes. VW modules don't use the SAE layout (a
   ●   369232 [05A250]  0xA8  confirmed, failed since clear, warning lamp
 ```
 
-That number is what you look up in a VW-aware tool (ODIS, VCDS, OBDeleven). Those tools also show an SAE-style code and a description, but both come from VW's database, not from the bytes, so dtcsweep can't derive them. If you have your own VCDS Auto-Scan, `dtcsweep.py import-vcds` can show its descriptions next to your codes (see the README).
+That number is what you look up in a VW-aware tool (ODIS, VCDS, OBDeleven). Those tools also show an SAE-style code and a description, but both come from VW's database, not from the bytes, so dtcsweep can't derive them. If you have your own VCDS Auto-Scan, `dtcsweep.py import-vcds` shows its descriptions next to your codes, marked `[your VCDS import]` (see the README).
 
 Printing the bytes in SAE layout gives misleading results. On the test car, the brake booster's `05 A2 50` would print as "P05A2-50" but is VCDS's 369232, improper shutdown (U3001). The engine's `00 72 3C` would print as "P0072-3C", which looks like the SAE ambient air temperature code, but it is 29244: the engine ECU recording that another module asked for the check engine light. Only 1 of 46 faults on that car happened to line up with its SAE-style code.
 

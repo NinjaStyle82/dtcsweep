@@ -39,6 +39,8 @@ tests/
   test_decoding.py     pure functions (DTC parsing, status, readiness, voltage)
   test_scan.py         full scans against the simulator, incl. read-only guarantee
   test_diff.py         diff command, changing the sim car between scans
+  test_vcds.py         import-vcds parser and lookup
+  fixtures/vcds-sample.txt  synthetic Auto-Scan in VCDS's layout (made-up text, cp1252)
 docs/setup.md          hardware, Linux/Windows setup, troubleshooting
 docs/interpreting.md   how to read output (codes, status bits, OBD, freeze frame, extended data)
 examples/sample-output.txt   trimmed real output, VIN redacted
@@ -60,6 +62,7 @@ examples/sample-output.txt   trimmed real output, VIN redacted
   - `read_details()`: `19 04 FF` and `19 06 FF` for the target DTC, or all active/confirmed with `--details`. `decode_vw_extended()` decodes record 01 (priority, frequency, reset counter, mileage; byte 9 and date layout unknown), from a VCDS comparison on one module; stored as `extended_decoded`
   - `read_obd()` for OBD ECUs: `01 01` (MIL + readiness, `decode_monitor_status`), Modes `03`/`07`/`0A`, Mode `09` PIDs `0A`/`04`/`02`, Mode `02` freeze frame if anything is stored
 - Output: `print_module()`, `print_cel()`, `print_summary()`. `out()` writes to the terminal and the log (ANSI stripped). JSON has every raw response.
+- `import_vcds_main()`: `python3 dtcsweep.py import-vcds LOG.txt`. `parse_vcds_log()` reads the user's own Auto-Scan (cp1252) into `{part number: {fault number: {text, sae, symptom, tag, module, component}}}`, merged into `vcds-import.json` under `config_dir()` (`$DTCSWEEP_CONFIG_DIR`, else `~/.config/dtcsweep`). No VIN or mileage stored. Scans call `attach_vcds()` (match by F187 part number + `vw_number`), shown as `[your VCDS import]`; an SAE `--target` also matches imported `sae`. Tests set `DTCSWEEP_CONFIG_DIR` per test (conftest). Test fixtures must use made-up text in VCDS's layout, never real VCDS output (rule 2).
 - `diff_main()`: `python3 dtcsweep.py diff OLD.json NEW.json`. Compares modules, DTCs, status bits, OBD lists, CEL and readiness, identity (software changes = reflash), freeze frame, and byte-level extended/snapshot changes (index 0 = `0x59`, 2–4 = DTC, 5 = status).
 
 ## Testing
@@ -80,7 +83,7 @@ Real-car verification is manual, by the maintainer. When a change affects on-car
   - battery voltage and engine running/off at start and end, `--min-voltage`
   - odometer and check engine light counters on the opening screen
   - `diff` command (incl. odometer, engine-state note, byte-level extended data)
-- The suite has 64 tests. `CHANGELOG.md` lists all of this under "Unreleased"; nothing is tagged beyond v0.1.0 yet.
+- The suite has 76 tests. `CHANGELOG.md` lists all of this under "Unreleased"; nothing is tagged beyond v0.1.0 yet.
 
 ## Known limitations
 
@@ -94,7 +97,7 @@ Real-car verification is manual, by the maintainer. When a change affects on-car
 1. **Direct slcan interface** (`--interface slcan --channel COM5`, python-can's serial backend) so Windows and macOS work without SocketCAN. Biggest reach win.
 2. **PyPI packaging** with a `dtcsweep` console entry point.
 3. **Observation export** (`--export-observations`: redacted module identities, codes, raw data, plus a "what was happening" field) and a GitHub issue template, as the start of a community code database.
-4. **`--import-vcds autoscan.txt`**: parse a user's own VCDS Auto-Scan into a local, gitignored code→description map. Needs a real Auto-Scan sample before writing the parser; don't guess the format.
+4. ~~VCDS import~~: done as `import-vcds` (parser built against a real Auto-Scan from VCDS 26.10). Possible follow-ups: show imported freeze-frame fields, import OBDeleven exports.
 5. **Saved car profiles**: remember discovered addresses per car to skip discovery.
 6. **Mode 06** monitor test results.
 7. **Raw CAN trace option** (candump format) for replaying bug reports.

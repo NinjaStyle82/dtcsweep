@@ -13,6 +13,8 @@ import sim_car  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def fresh_car():
+def fresh_car(tmp_path, monkeypatch):
     sim_car.reset()
+    # never read or write the real ~/.config/dtcsweep during tests
+    monkeypatch.setenv("DTCSWEEP_CONFIG_DIR", str(tmp_path / "config"))
     yield

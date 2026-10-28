@@ -36,6 +36,7 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
 - **Extended data decoded.** For VW's common extended data record, dtcsweep shows how many times a fault was seen, its reset counter, and the mileage when it was last recorded (layout worked out against VCDS on the test car).
 - **Target hunting:** `--target 369232` (or `0x05A250`, or `U3001` for OBD lists) flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
 - **Readable output.** Faults are color-coded by severity, there's a summary table, and a `.log` (plain text) and `.json` (all raw bytes) are written alongside.
+- **Your own VCDS descriptions.** `dtcsweep.py import-vcds Log.txt` reads a VCDS Auto-Scan you made and shows its descriptions next to your codes, stored only on your machine.
 - **Scan diff.** `dtcsweep.py diff OLD.json NEW.json` shows what changed between two scans: new and cleared codes, status changes, check engine light and readiness changes, software updates, and byte-level changes in extended data.
 - **`--redact`** masks the VIN everywhere, for sharing logs publicly.
 
@@ -167,6 +168,23 @@ python3 dtcsweep.py --target U3001             # where is U3001 stored?
 python3 dtcsweep.py --details --redact         # full detail, safe to share
 python3 dtcsweep.py --schemes 29obd            # quick emissions-ECU check
 ```
+
+### Using your own VCDS scan
+
+dtcsweep ships no VW descriptions. If you have VCDS, save an Auto-Scan as text and import it once:
+
+```bash
+python3 dtcsweep.py import-vcds Log-<VIN>-<mileage>.txt
+```
+
+The fault descriptions are stored in `~/.config/dtcsweep/vcds-import.json` (or `$DTCSWEEP_CONFIG_DIR`), matched by module part number and fault number. The VIN and mileage from the log are not stored. Later scans show them under each code:
+
+```
+  ●   369232 [05A250]  0xA8  confirmed, failed since clear, warning lamp
+      [your VCDS import] U3001 00 · <VCDS's description>
+```
+
+With an import, `--target U3001` also finds VW codes that VCDS lists as U3001. Import newer logs any time; entries are updated, not duplicated. **Never commit this file or your VCDS logs**: the descriptions come from VCDS, and the logs contain your VIN.
 
 ### Comparing scans
 

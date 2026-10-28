@@ -1,0 +1,68 @@
+Tuesday,27,October,2026,20:16:13:47490
+VCDS -- Windows Based VAG/VAS Emulator Running on Windows 11 x64
+VCDS Version: 0.0 (synthetic test fixture, not a real scan)
+
+VIN: WVWZZZCDZTW000001   License Plate:
+Mileage: 1659km-1030mi   Repair Order:
+
+--------------------------------------------------------------------------------
+
+Chassis Type: TEST
+Scan: 01 03 23
+
+VIN: WVWZZZCDZTW000001   Mileage: 1659km-1030miles
+
+01-Engine -- Status: Malfunction 0010
+03-ABS Brakes -- Status: Malfunction 0010
+23-Brake Booster -- Status: Malfunction 0010
+-------------------------------------------------------------------------------
+Address 01: Engine (J623-DSFD)       Labels: None
+   Part No SW: 5WA 906 259 XX    HW: 06K 907 425 AA
+   Component: R4 2.0l TFS   H80 0001
+   Coding: 00
+
+1 Fault Found:
+29244 - Example: another module asked for the warning lamp
+          P1624 00 [00101000] - -
+          [example_internal_tag]
+          Intermittent - Confirmed - Tested Since Memory Clear
+             Freeze Frame:
+                    Fault Priority: 6
+                    Coolant temperature: 69 °C
+
+-------------------------------------------------------------------------------
+Address 03: ABS Brakes (J104)       Labels:. test.clb
+   Part No SW: 5WA 614 517 XX    HW: 5WA 614 517 BS
+   Component: ESC           H31 0339
+
+   Parking lock:
+   Subsystem 1 - Part No SW: 1XX 111 111 A    HW: 1XX 111 111
+   Component: SUBSYS        H03 1092
+
+1 Fault Found:
+8730 - Example: implausible data from the parking module
+          U045A 00 [00100000] - Example Symptom
+          Intermittent - Not Confirmed - Tested Since Memory Clear
+
+-------------------------------------------------------------------------------
+Address 23: Brake Booster (J539)       Labels: None
+   Part No SW: 5WA 909 059 XX    HW: 3Q0 909 059 D
+   Component: EBKV          H10 0563
+
+1 Fault Found:
+369232 - Example: booster lost power before saving its state
+          U3001 00 [00101000] - -
+          Intermittent - Confirmed - Tested Since Memory Clear
+             Freeze Frame:
+                    Fault Priority: 2
+                    Mileage: 374 km
+
+-------------------------------------------------------------------------------
+Address 2B: Steer. Col. Lock (J764)       Labels:. test.clb
+   Part No SW: 3WA 905 861 A    HW: 3WA 905 861
+   Component: ELV-MQB_UNECE H05 0071
+
+No fault code found.
+
+End----------(Elapsed Time: 02:39, VBatt start/end: 14.2V/14.9V)-----------
+------------------------------3 Faults Found------------------------------

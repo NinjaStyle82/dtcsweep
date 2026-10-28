@@ -11,5 +11,8 @@ __pycache__/
 venv/
 canenv/
 
+# Local VCDS import (descriptions from your own Auto-Scan). Never commit.
+vcds-import.json
+
 # Personal notes for Claude Code (car details). Never commit.
 CLAUDE.local.md

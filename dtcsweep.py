@@ -41,6 +41,9 @@ USEFUL OPTIONS
 COMPARE TWO SCANS
   python3 dtcsweep.py diff OLD.json NEW.json
 
+SHOW YOUR OWN VCDS DESCRIPTIONS (stored locally, never in the repo)
+  python3 dtcsweep.py import-vcds Log-....txt
+
 Ignition ON, engine off, battery maintainer recommended.
 """
 
@@ -743,6 +746,8 @@ def print_module(mod, show_all):
         flag = red("  ◀ TARGET") if d.get("target") else ""
         status = dim("0x%02X" % d["status"])
         out(f"  {marker} {code}  {status}  {', '.join(d['labels'])}{flag}")
+        if d.get("vcds"):
+            out(f"      {dim('[your VCDS import]')} {vcds_text(d)}")
         for key in ("snapshot", "extended"):
             if key in d:
                 out(f"      {dim(key + ':')} {d[key]}")
@@ -819,9 +824,10 @@ def print_summary(mods, target_txt, hits):
         if notable or obd:
             out(bold("  Faults worth attention:"))
             for mod, d in notable:
+                vt = dim(f"  [{vcds_text(d)}]") if d.get("vcds") else ""
                 out(f"    {sev_paint(d['severity'], d['code']):<9}  "
                     f"{module_title(mod)} [{fmt_id(mod['tx'], mod['ext'])}]  "
-                    f"{', '.join(d['labels'])}")
+                    f"{', '.join(d['labels'])}{vt}")
             for mod, code, ks in obd:
                 out(f"    {yellow(code)}  {module_title(mod)} "
                     f"[{fmt_id(mod['tx'], mod['ext'])}]  OBD {', '.join(ks)}")
@@ -833,11 +839,143 @@ def print_summary(mods, target_txt, hits):
         out(red(bold(f"  {target_txt} FOUND in {len(hits)} module(s):")))
         for mod, d in hits:
             st = f"status 0x{d['status']:02X} " if d["status"] is not None else ""
+            vt = dim(f"  [{vcds_text(d)}]") if d.get("vcds") else ""
             out(f"    {module_title(mod)} [{fmt_id(mod['tx'], mod['ext'])}]  "
-                f"{d['code']}  {st}({', '.join(d['labels'])})")
+                f"{d['code']}  {st}({', '.join(d['labels'])}){vt}")
     else:
         out(green(f"  {target_txt} not stored in any module that answered."))
     out()
+
+
+# --------------------------------------------------------------- VCDS import
+# A user's own VCDS Auto-Scan, parsed into a local file outside the repo so
+# scans can show VCDS's descriptions next to their fault numbers. Only the
+# fault text is kept; the VIN and mileage in the log are never stored.
+
+VCDS_ADDRESS = re.compile(r"^Address ([0-9A-F]{2,4}): (.+?) \(")
+VCDS_PART = re.compile(r"^   Part No(?: SW)?: (.+?)(?:\s{2,}HW:.*)?$")
+VCDS_COMPONENT = re.compile(r"^   Component: (.+?)\s*$")
+VCDS_FAULT = re.compile(r"^(\d+) - (.*?)\s*$")
+VCDS_CODE = re.compile(r"^\s+([PCBU][0-9A-F]{4}) ([0-9A-F]{2}) \[[01]{8}\] - (.*?)\s*$")
+VCDS_TAG = re.compile(r"^\s+\[(.+)\]\s*$")
+
+
+def config_dir():
+    if os.environ.get("DTCSWEEP_CONFIG_DIR"):
+        return os.environ["DTCSWEEP_CONFIG_DIR"]
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "dtcsweep")
+
+
+def vcds_import_path():
+    return os.path.join(config_dir(), "vcds-import.json")
+
+
+def norm_part(text):
+    return "".join((text or "").split()).upper()
+
+
+def parse_vcds_log(path):
+    """{part number: {fault number: {...}}} from a VCDS Auto-Scan text log."""
+    with open(path, encoding="cp1252", errors="replace") as f:
+        lines = f.read().splitlines()
+    entries = {}
+    module = part = component = None
+    fault = None
+    for line in lines:
+        m = VCDS_ADDRESS.match(line)
+        if m:
+            module, part, component, fault = f"{m.group(1)} {m.group(2)}", None, None, None
+            continue
+        if module is None:
+            continue
+        m = VCDS_PART.match(line)
+        if m and part is None:
+            part = norm_part(m.group(1))
+            continue
+        m = VCDS_COMPONENT.match(line)
+        if m and component is None:
+            # name, then a version like "H10 0563" or a bare "0517"
+            component = re.sub(r"(\s+[A-Z0-9]{3})?\s+\d{4}$", "", m.group(1))
+            continue
+        m = VCDS_FAULT.match(line)
+        if m and part:
+            fault = {"text": m.group(2), "module": module, "component": component}
+            entries.setdefault(part, {})[str(int(m.group(1)))] = fault
+            continue
+        if fault is None:
+            continue
+        m = VCDS_CODE.match(line)
+        if m and "sae" not in fault:
+            fault["sae"] = f"{m.group(1)} {m.group(2)}"
+            if m.group(3) not in ("-", ""):
+                fault["symptom"] = m.group(3)
+            continue
+        m = VCDS_TAG.match(line)
+        if m and "sae" in fault and "tag" not in fault:
+            fault["tag"] = m.group(1)
+            continue
+        fault = None    # anything else ends this fault's header lines
+    return entries
+
+
+def load_vcds_import():
+    try:
+        with open(vcds_import_path(), encoding="utf-8") as f:
+            return json.load(f).get("faults", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def import_vcds_main(argv):
+    ap = argparse.ArgumentParser(
+        prog="dtcsweep.py import-vcds",
+        description="Store fault descriptions from your own VCDS Auto-Scan logs locally "
+                    f"({vcds_import_path()}), so scans can show them. Never commit this file.")
+    ap.add_argument("logs", nargs="+", help="VCDS Auto-Scan .txt log(s)")
+    args = ap.parse_args(argv)
+    path = vcds_import_path()
+    try:
+        with open(path, encoding="utf-8") as f:
+            store = json.load(f)
+    except (OSError, ValueError):
+        store = {}
+    faults = store.setdefault("faults", {})
+    for log in args.logs:
+        try:
+            entries = parse_vcds_log(log)
+        except OSError as e:
+            sys.exit(f"Could not read {log}: {e}")
+        count = 0
+        for part, codes in entries.items():
+            faults.setdefault(part, {}).update(codes)
+            count += len(codes)
+        store.setdefault("sources", []).append(
+            {"file": os.path.basename(log), "imported": datetime.now().isoformat(timespec="seconds")})
+        print(f"{os.path.basename(log)}: {count} fault description(s) for {len(entries)} module(s)")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(store, f, indent=2, ensure_ascii=False)
+    print(f"Saved to {path} (local only; keep it out of git).")
+    return 0
+
+
+def attach_vcds(mod, imported):
+    """Copy matching imported VCDS descriptions onto a module's DTCs."""
+    codes = imported.get(norm_part(mod.get("ident", {}).get("part", {}).get("text")), {})
+    for d in mod.get("dtcs", []):
+        if d["code"] in codes:
+            d["vcds"] = codes[d["code"]]
+
+
+def vcds_text(d):
+    v = d.get("vcds")
+    if not v:
+        return ""
+    parts = [v.get("sae", ""), v.get("text", "")]
+    if v.get("symptom"):
+        parts.append(v["symptom"])
+    return " · ".join(p for p in parts if p)
 
 
 # ---------------------------------------------------------------------- diff
@@ -879,8 +1017,9 @@ def diff_module(old, new):
     nd = {d["raw"]: d for d in new.get("dtcs", [])}
     for raw in sorted(nd.keys() - od.keys()):
         d = nd[raw]
+        vt = dim(f"  [{vcds_text(d)}]") if d.get("vcds") else ""
         lines.append(sev_paint(d["severity"], f"+ {d['code']:<9}") +
-                     f" new       0x{d['status']:02X}  {', '.join(d['labels'])}")
+                     f" new       0x{d['status']:02X}  {', '.join(d['labels'])}{vt}")
     for raw in sorted(od.keys() - nd.keys()):
         d = od[raw]
         lines.append(green(f"- {d['code']:<9}") +
@@ -1036,6 +1175,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "diff":
         return diff_main(argv[1:])
+    if argv and argv[0] == "import-vcds":
+        return import_vcds_main(argv[1:])
     ap = argparse.ArgumentParser(
         description="Read-only multi-module DTC scanner for VW Group cars (SocketCAN).")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -1044,7 +1185,8 @@ def main(argv=None):
     ap.add_argument("--fd", action="store_true", help="send CAN FD frames")
     ap.add_argument("--schemes", default="11vag,11obd,29obd,29vag",
                     help="comma list of: " + ", ".join(SCHEMES))
-    ap.add_argument("--target", help="DTC to hunt for, e.g. U3001 or U3001-00")
+    ap.add_argument("--target", help="DTC to hunt for: VW fault number (369232), "
+                    "hex (0x05A250), or SAE code (U3001: OBD lists, plus VCDS-imported codes)")
     ap.add_argument("--all", action="store_true", help="list never-failed DTCs too")
     ap.add_argument("--details", action="store_true",
                     help="freeze-frame/extended data for all active+confirmed DTCs")
@@ -1065,6 +1207,7 @@ def main(argv=None):
     if bad:
         sys.exit(f"Unknown scheme(s): {', '.join(bad)}. Choose from {', '.join(SCHEMES)}.")
     target = parse_target(args.target) if args.target else None
+    imported = load_vcds_import()
     target_txt = args.target.strip().upper() if args.target else None
     mask = 0xFF if args.all else DEFAULT_MASK
 
@@ -1129,9 +1272,12 @@ def main(argv=None):
             try:
                 read_identity(stack, mod)
                 read_dtcs(stack, mod, mask)
+                attach_vcds(mod, imported)
                 for d in mod["dtcs"]:
                     raw = bytes.fromhex(d["raw"])
-                    if target and target.get("raw") == raw:
+                    sae = (d.get("vcds") or {}).get("sae", "")
+                    if target and (target.get("raw") == raw
+                                   or (target.get("sae") and sae.startswith(target["sae"]))):
                         d["target"] = True
                         hits.append((mod, d))
                         read_details(stack, d)
