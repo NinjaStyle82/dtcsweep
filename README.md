@@ -28,12 +28,12 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
   It also sends functional OBD requests on `0x7DF` and `0x18DB33F1`.
 - **Identity per module:** system name, part number, software and hardware versions. For OBD-only ECUs it uses OBD Mode 09 to get the ECU name, calibration ID and VIN.
 - **Only real faults shown.** DTCs are requested with a status mask, so the report shows codes that have actually failed, not the hundreds of supported-but-never-tested entries some modules list. `--all` shows everything.
-- **Failure type in plain words.** The byte after the dash (`-13`, `-87`) is decoded from the public SAE/ISO scheme, e.g. "open circuit" or "message missing", for every module.
+- **VW fault numbers.** Codes from VW modules are shown as the fault number VW tools use (e.g. `369232 [05A250]`), so you can look them up in VCDS, ODIS or OBDeleven. OBD codes keep their SAE format (`U3001`).
 - **Who turned on the check engine light.** Each emissions-relevant ECU reports whether it is requesting the light (OBD Mode 01 PID 01), so the summary names the module behind it, along with emissions readiness monitor status.
 - **OBD Modes 03 / 07 / 0A** (stored, pending, permanent) for emissions-relevant ECUs, plus a **Mode 02 freeze frame** including module supply voltage.
 - **Odometer and check engine light counters.** Odometer, distance and time driven with the light on, and distance and time since codes were cleared, at the top of every scan; `diff` shows the distance driven between scans.
 - **Battery check.** Module supply voltage is read at the start and end of every scan, with a warning when it's low, and with whether the engine is running. `--min-voltage 12.2` refuses to scan below a threshold.
-- **Target hunting:** `--target U3001` flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
+- **Target hunting:** `--target 369232` (or `0x05A250`, or `U3001` for OBD lists) flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
 - **Readable output.** Faults are color-coded by severity, there's a summary table, and a `.log` (plain text) and `.json` (all raw bytes) are written alongside.
 - **Scan diff.** `dtcsweep.py diff OLD.json NEW.json` shows what changed between two scans: new and cleared codes, status changes, check engine light and readiness changes, software updates, and byte-level changes in extended data.
 - **`--redact`** masks the VIN everywhere, for sharing logs publicly.
@@ -143,7 +143,7 @@ Then turn the ignition off and unplug the OBD connector.
 ```text
 python3 dtcsweep.py [options]
 
-  --target CODE      hunt one DTC (e.g. U3001 or U3001-00) and pull its detail records
+  --target CODE      hunt one DTC (VW fault number 369232, hex 0x05A250, or OBD U3001) and pull its detail records
   --details          pull extended/snapshot data for every active or confirmed DTC
   --all              also list DTCs that have never failed
   --schemes LIST     comma list of 11vag, 11obd, 29obd, 29vag (default: all four)

@@ -17,15 +17,15 @@ dtcsweep  ·  20261024-012055  ·  read-only  ·  classic CAN  ·  target U3001
 
 ── ESC  [0x713 → 0x77D, 11-bit VAG] ──────────────────────────────────────────
   Part 5WA614517EA  ·  SW 0339  ·  HW 5WA614517BS
-  ● P0022-1A  0x20  failed since clear
+  ●     8730 [00221A]  0x20  failed since clear
 
 ── EBKV  [0x73B → 0x7A5, 11-bit VAG] ─────────────────────────────────────────
   Part 5WA909059AH  ·  SW 0563  ·  HW 3Q0909059D
-  ● P05A2-50  0xA8  confirmed, failed since clear, warning lamp
+  ●   369232 [05A250]  0xA8  confirmed, failed since clear, warning lamp
 
 ── R4 2.0l TFS  [0x17FC0076 → 0x17FE0076, 29-bit VAG] ────────────────────────
   Part 5WA906259Q  ·  SW 0001  ·  HW 06K907425AA
-  ● P0072-3C  0x2F  failing now, failed this cycle, pending, confirmed, failed since clear
+  ●    29244 [00723C]  0x2F  failing now, failed this cycle, pending, confirmed, failed since clear
 
 ── ECM -EngineControl  [0x18DA01F1 → 0x18DAF101, 29-bit OBD · OBD] ───────────
   DTC read failed: NRC 0x11 serviceNotSupported

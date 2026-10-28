@@ -45,20 +45,20 @@ def test_discovers_all_schemes(tmp_path, capsys):
 
 def test_hides_untested_dtcs_by_default(tmp_path, capsys):
     text, _, _ = run(tmp_path, capsys)
-    assert "P0001-0A" not in text          # status 0x50 = never failed
-    assert "B1505-00" in text              # status 0x09 = failing now
+    assert "[00010A]" not in text          # status 0x50 = never failed
+    assert "9766144 [950500]" in text      # status 0x09 = failing now
 
 
 def test_all_shows_untested_dtcs(tmp_path, capsys):
     text, _, _ = run(tmp_path, capsys, "--all")
-    assert "P0001-0A" in text
+    assert "266 [00010A]" in text
 
 
 def test_response_too_long_narrows_mask(tmp_path, capsys):
     _, _, data = run(tmp_path, capsys)
     mem = next(m for m in data["modules"] if scan.module_title(m) == "MEM-FS")
     assert mem["mask_used"] == 0x08
-    assert [d["code"] for d in mem["dtcs"]] == ["U0100-00"]
+    assert [d["code"] for d in mem["dtcs"]] == ["12648448"]
 
 
 def test_target_found_via_obd_with_freeze_frame(tmp_path, capsys):
@@ -70,7 +70,7 @@ def test_target_found_via_obd_with_freeze_frame(tmp_path, capsys):
 
 
 def test_target_in_uds_pulls_extended_data(tmp_path, capsys):
-    _, _, data = run(tmp_path, capsys, "--target", "P05A2-50")
+    _, _, data = run(tmp_path, capsys, "--target", "369232")
     ebkv = next(m for m in data["modules"] if scan.module_title(m) == "EBKV")
     dtc = ebkv["dtcs"][0]
     assert dtc["target"] is True
@@ -189,9 +189,16 @@ def test_min_voltage_refuses_to_scan(tmp_path, capsys):
     assert {p[0] for _, _, p in sim_car.SENT} == {0x01}
 
 
-def test_failure_type_shown_and_saved(tmp_path, capsys):
-    text, log, data = run(tmp_path, capsys)
-    assert "type (SAE scheme, may not apply): programming/configuration (category only)" in text
-    assert "[programming/configuration (category only)]" in log
+def test_vw_fault_numbers_shown(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys)
+    assert "369232 [05A250]  0xA8" in text
+    assert "type" not in text.split("SUMMARY")[0].split("EBKV")[1].split("R4 2.0l")[0]
     ebkv = next(m for m in data["modules"] if m["tx"] == 0x73B)
-    assert ebkv["dtcs"][0]["failure_type"] == "programming/configuration (category only)"
+    assert ebkv["dtcs"][0]["code"] == "369232" and "failure_type" not in ebkv["dtcs"][0]
+
+
+def test_target_by_hex(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys, "--target", "0x05A250")
+    assert "0X05A250 FOUND in 1 module(s)" in text
+    ebkv = next(m for m in data["modules"] if m["tx"] == 0x73B)
+    assert ebkv["dtcs"][0]["target"] is True

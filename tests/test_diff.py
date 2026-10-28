@@ -36,19 +36,19 @@ def change_the_car():
 
 
 def test_diff_reports_every_kind_of_change(tmp_path, capsys):
-    old = scan_to(tmp_path / "a", capsys, "--target", "P05A2-50")
+    old = scan_to(tmp_path / "a", capsys, "--target", "369232")
     change_the_car()
-    new = scan_to(tmp_path / "b", capsys, "--target", "P05A2-50")
+    new = scan_to(tmp_path / "b", capsys, "--target", "369232")
     text = diff(capsys, old, new)
 
     assert "Battery at start: 12.45 V → 12.21 V" in text
     assert "- Module not answering: MEM-FS [0x74C]" in text
     assert "~ Software 0563 → 0571" in text
-    assert "~ P05A2-50  status    0xA8 → 0x28  (-warning lamp)" in text
+    assert "~ 369232    status    0xA8 → 0x28  (-warning lamp)" in text
     # occurrence-style counter 02 -> 03 and healing-style counter 28 -> 27
-    assert "extended  bytes [5] A8→28, [7] 02→03, [10] 28→27" in text
-    assert "+ C0123-00  new" in text
-    assert "- B1505-00  gone" in text
+    assert "~ 369232    extended  bytes [5] A8→28, [7] 02→03, [10] 28→27" in text
+    assert "+ 4268800   new" in text
+    assert "- 9766144   gone" in text
     assert "- U3001     OBD permanent (cleared)" in text
     assert "~ CEL request ON → off" in text
     assert "~ Readiness evaporative system: complete" in text

@@ -4,25 +4,40 @@ import dtcsweep as scan
 
 
 @pytest.mark.parametrize("raw,expected", [
-    (b"\xF0\x01\x00", "U3001-00"),
-    (b"\x00\x72\x3C", "P0072-3C"),
-    (b"\x95\x05\x00", "B1505-00"),
+    (b"\xF0\x01", "U3001"),
     (b"\x41\x23", "C0123"),
+    (b"\x00\x72", "P0072"),
 ])
 def test_dtc_str(raw, expected):
     assert scan.dtc_str(raw) == expected
 
 
-def test_parse_dtc_roundtrip():
-    b0, b1, ftb = scan.parse_dtc("u3001-00")
-    assert scan.dtc_str(bytes([b0, b1, ftb])) == "U3001-00"
-    assert scan.parse_dtc("P0300")[2] is None
+@pytest.mark.parametrize("raw,expected", [
+    # values cross-checked against a VCDS Auto-Scan of the test car
+    (b"\x05\xA2\x50", "369232"),
+    (b"\x00\x72\x3C", "29244"),
+    (b"\xC0\x00\x47", "12582983"),
+    (b"\x00\x01\x42", "322"),
+])
+def test_vw_number(raw, expected):
+    assert scan.vw_number(raw) == expected
 
 
-@pytest.mark.parametrize("bad", ["U9999", "X1234", "P03", "P0300-ZZ"])
-def test_parse_dtc_rejects_invalid(bad):
+@pytest.mark.parametrize("text,expected", [
+    ("369232", {"raw": b"\x05\xA2\x50"}),
+    ("0x05a250", {"raw": b"\x05\xA2\x50"}),
+    ("u3001", {"sae": "U3001"}),
+    ("U3001-00", {"sae": "U3001"}),
+    ("U3001 00", {"sae": "U3001"}),
+])
+def test_parse_target(text, expected):
+    assert scan.parse_target(text) == expected
+
+
+@pytest.mark.parametrize("bad", ["U9999", "X1234", "P03", "P0300-ZZ", "0x05A2", "99999999"])
+def test_parse_target_rejects_invalid(bad):
     with pytest.raises(SystemExit):
-        scan.parse_dtc(bad)
+        scan.parse_target(bad)
 
 
 @pytest.mark.parametrize("status,sev", [
@@ -64,18 +79,3 @@ def test_monitor_status_incomplete_continuous_and_diesel():
 def test_assess_voltage(volts, level):
     assert scan.assess_voltage(volts)[0] == level
 
-
-@pytest.mark.parametrize("ftb,text", [
-    (0x00, None),
-    (0x02, "signal (category only)"),
-    (0x04, "module internal (category only)"),
-    (0x0A, None),
-    (0x11, "short to ground"),
-    (0x87, "message missing"),
-    (0x50, "programming/configuration (category only)"),
-    (0x3C, "frequency/PWM signal (category only)"),
-    (0xF3, "manufacturer-specific (category only)"),
-    (0xB0, None),
-])
-def test_failure_type(ftb, text):
-    assert scan.failure_type(ftb) == text

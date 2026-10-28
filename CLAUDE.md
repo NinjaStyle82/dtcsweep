@@ -56,7 +56,7 @@ examples/sample-output.txt   trimmed real output, VIN redacted
 - `discover()`: fire-and-collect raw single-frame `3E 00` to every candidate (~3 ms spacing), then listen 1 s. `discover_obd()`: functional `01 00`. `--slow`: real `19 02` probe per silent address.
 - Per module, via `make_stack()` (can-isotp 2.x: `stack.start()`, `recv(block=True, timeout=...)`, `stack.stop()`) and `uds()`, which handles NRC `0x78` (pending) and `0x21` (busy):
   - `read_identity()`: DIDs `F197`, `F187`, `F189`, `F191`, `F19E`
-  - `read_dtcs()`: `19 02` with mask `0x2D`; narrows to `0x08`, then `0x01`, on NRC `0x14`. Each DTC gets `failure_type` from `failure_type()` (`FTB_TYPES`, falling back to `FTB_CATEGORIES` by high nibble; own wording)
+  - `read_dtcs()`: `19 02` with mask `0x2D`; narrows to `0x08`, then `0x01`, on NRC `0x14`. Each DTC's `code` is `vw_number()`: the 3 bytes as one decimal number, as VCDS shows it. VW modules don't use the SAE letter + failure-type layout (checked against a VCDS Auto-Scan: 1 of 46 codes matched), so don't render UDS DTCs as SAE codes. `dtc_str()` is only for 2-byte OBD codes. `parse_target()` takes a number, `0x` hex, or an SAE code (OBD lists only)
   - `read_details()`: `19 04 FF` and `19 06 FF` for the target DTC, or all active/confirmed with `--details`
   - `read_obd()` for OBD ECUs: `01 01` (MIL + readiness, `decode_monitor_status`), Modes `03`/`07`/`0A`, Mode `09` PIDs `0A`/`04`/`02`, Mode `02` freeze frame if anything is stored
 - Output: `print_module()`, `print_cel()`, `print_summary()`. `out()` writes to the terminal and the log (ANSI stripped). JSON has every raw response.
@@ -80,7 +80,6 @@ Real-car verification is manual, by the maintainer. When a change affects on-car
   - battery voltage and engine running/off at start and end, `--min-voltage`
   - odometer and check engine light counters on the opening screen
   - `diff` command (incl. odometer, engine-state note, byte-level extended data)
-  - failure type byte decoding, shown as a hint
 - The suite has 64 tests. `CHANGELOG.md` lists all of this under "Unreleased"; nothing is tagged beyond v0.1.0 yet.
 
 ## Known limitations

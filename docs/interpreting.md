@@ -2,37 +2,27 @@
 
 ## DTC codes
 
-Each UDS DTC is 3 bytes, printed as `P0072-3C`: a letter, four hex digits, then the failure-type byte.
+### VW modules: fault numbers
 
-The letter comes from the top two bits of the first byte: `P` powertrain, `C` chassis, `B` body, `U` network.
+Each UDS DTC from a VW module is 3 bytes. VW modules don't use the SAE layout (a letter, four digits and a failure-type byte); the 3 bytes are one **VW fault number**. dtcsweep prints it the way VW tools such as VCDS do, as a decimal number, with the raw bytes in brackets:
 
-**Standard SAE meanings apply only to emissions-relevant codes** (most `P0xxx` codes from the engine and transmission, plus codes reported through OBD Modes 03/07/0A). VW modules use their own internal numbering in the same 3-byte format. So a `P0304-0C` from the body control module, or a dozen `P0007-xx` from the ACC radar, are VW-specific codes that happen to print that way. They are not misfires or fuel-system faults. Looking them up in a generic OBD code list will give wrong answers.
+```
+  ●   369232 [05A250]  0xA8  confirmed, failed since clear, warning lamp
+```
 
-To get proper descriptions for VW-internal codes, use VW-aware tools (ODIS, VCDS, OBDeleven). This project deliberately ships no VW label data.
+That number is what you look up in a VW-aware tool (ODIS, VCDS, OBDeleven). Those tools also show an SAE-style code and a description, but both come from VW's database, not from the bytes, so dtcsweep can't derive them. If you have your own VCDS Auto-Scan, `dtcsweep.py import-vcds` can show its descriptions next to your codes (see the README).
 
-### Failure type (the part after the dash)
+Printing the bytes in SAE layout gives misleading results. On the test car, the brake booster's `05 A2 50` would print as "P05A2-50" but is VCDS's 369232, improper shutdown (U3001). The engine's `00 72 3C` would print as "P0072-3C", which looks like the SAE ambient air temperature code, but it is 29244: the engine ECU recording that another module asked for the check engine light. Only 1 of 46 faults on that car happened to line up with its SAE-style code.
 
-The last byte, `-50` in `P05A2-50`, says *how* something failed. Public standards (SAE J2012 / ISO 14229) give it a structure that isn't VW-specific, so dtcsweep prints a `type (SAE scheme, may not apply):` line under each code:
+To hunt one code, use `--target 369232` or `--target 0x05A250`.
 
-| First hex digit | Category |
-|---|---|
-| `0` | general: `-01` to `-09` mean a general fault of category 1 to 9 (`-02` general signal fault); `-00` and `-0A` to `-0F` carry no detail, so nothing is printed |
-| `1` | electrical circuit, e.g. `-11` short to ground, `-13` open circuit |
-| `2` | signal, e.g. `-23` stuck low, `-29` invalid |
-| `3` | frequency/PWM signal |
-| `4` | module internal, e.g. `-49` internal electronics fault |
-| `5` | programming/configuration, e.g. `-54` calibration missing |
-| `6` | plausibility/algorithm, e.g. `-64` signal implausible |
-| `7` | mechanical, e.g. `-71` actuator stuck |
-| `8` | bus/network message, e.g. `-87` message missing |
-| `9` | component, e.g. `-92` performance or wrong operation |
-| `F` | manufacturer-specific |
+### OBD codes
 
-When dtcsweep knows the specific value it prints that (`short to ground`). Otherwise it prints the category with "(category only)". Treat it as a hint about the kind of fault, not a diagnosis: manufacturers don't always follow the standard for their internal codes, so a VW-internal code's failure type can mean something else. On the test car, the ACC radar uses about 15 different failure types on the same `P0007` code, which suggests VW's own meanings there. The descriptions are written in our own words.
+Codes from OBD Modes 03/07/0A (and the freeze frame trigger) are 2 bytes in the standard SAE format, printed as e.g. `U3001`. These do carry SAE meanings: the letter is the system (`P` powertrain, `C` chassis, `B` body, `U` network) and `P0xxx` codes have standard descriptions. `--target U3001` finds them.
 
 ### The same fault twice
 
-The same fault can appear twice in different forms. On the test car, the electric brake booster reported `P05A2-50` over UDS and `U3001` over OBD, which was very likely the same event. Match modules by calibration ID or part number to spot this. The OBD-only address (`0x18DA03F1`, named `EBBC-ElecBrkBstCtrl`) and the UDS module (`EBKV` at `0x73B`) had matching part and software numbers.
+The same fault can appear twice in different forms. On the test car, the electric brake booster reported 369232 over UDS and `U3001` over OBD; VCDS confirms both are the same improper-shutdown fault. Match modules by calibration ID or part number to spot this. The OBD-only address (`0x18DA03F1`, named `EBBC-ElecBrkBstCtrl`) and the UDS module (`EBKV` at `0x73B`) had matching part and software numbers.
 
 ## Status byte and severity
 
@@ -123,7 +113,7 @@ The record numbers and field layouts come from VW's diagnostic database and are 
 To work out what a record means, compare scans over time with `dtcsweep.py diff`. It prints the index of every byte that changed, counting from the start of the response (byte 0 is `0x59`, bytes 2–4 are the DTC, byte 5 is its status). For example:
 
 ```
-~ P05A2-50  extended  bytes [5] A8→28, [7] 02→03, [10] 28→27
+~ 369232    extended  bytes [5] A8→28, [7] 02→03, [10] 28→27
 ```
 
 Here byte 5 is the status (warning lamp request cleared), byte 7 went up by one when the fault recurred (an occurrence counter is a good guess), and byte 10 went down by one (a healing counter counting drive cycles is a good guess). Several scans that agree turn a guess into a finding.
