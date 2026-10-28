@@ -7,7 +7,9 @@ import dtcsweep as scan
 
 # Services a read-only scanner may send. Anything else is a bug.
 ALLOWED_SERVICES = {0x01, 0x02, 0x03, 0x07, 0x09, 0x0A, 0x19, 0x22, 0x3E}
-ALLOWED_0x19_SUBFUNCTIONS = {0x02, 0x04, 0x06}
+ALLOWED_0x19_SUBFUNCTIONS = {0x02, 0x03, 0x04, 0x06}
+# The one opt-in exception (--extended-session): extended session and back.
+ALLOWED_SESSIONS = {0x03, 0x01}
 
 
 def run(tmp_path, capsys, *args):
@@ -23,20 +25,47 @@ def run(tmp_path, capsys, *args):
     return text, log, data
 
 
-def test_read_only_guarantee(tmp_path, capsys):
-    run(tmp_path, capsys, "--details", "--target", "U3001")
-    assert sim_car.SENT, "scanner sent nothing"
-    for ext, arb, payload in sim_car.SENT:
+def check_read_only(sent):
+    in_extended = None     # module currently switched to the extended session
+    for ext, arb, payload in sent:
+        if payload[0] == 0x10:
+            assert payload[1] in ALLOWED_SESSIONS, f"session 0x{payload[1]:02X} to 0x{arb:X}"
+            assert not (ext is False and arb == 0x715), "session change sent to the airbag module"
+            if payload[1] == 0x03:
+                assert in_extended is None
+                in_extended = (ext, arb)
+            else:
+                assert in_extended == (ext, arb), "10 01 without a matching 10 03"
+                in_extended = None
+            continue
+        assert in_extended in (None, (ext, arb)), \
+            f"request to 0x{arb:X} while 0x{in_extended[1]:X} is still in the extended session"
+        if in_extended:
+            assert payload[:2] in (b"\x19\x03", b"\x19\x04"), "only snapshot reads in the extended session"
         assert payload[0] in ALLOWED_SERVICES, f"non-read service 0x{payload[0]:02X} to 0x{arb:X}"
         if payload[0] == 0x19:
             assert payload[1] in ALLOWED_0x19_SUBFUNCTIONS
         if payload[0] == 0x3E:
             assert payload[1:2] == b"\x00"
+    assert in_extended is None, "a module was left in the extended session"
+
+
+def test_read_only_guarantee(tmp_path, capsys):
+    run(tmp_path, capsys, "--details", "--target", "U3001")
+    assert sim_car.SENT, "scanner sent nothing"
+    check_read_only(sim_car.SENT)
+    assert not any(p[0] == 0x10 for _, _, p in sim_car.SENT), "session change without --extended-session"
+
+
+def test_read_only_guarantee_with_extended_session(tmp_path, capsys):
+    run(tmp_path, capsys, "--details", "--extended-session")
+    assert any(p[:2] == b"\x10\x03" for _, _, p in sim_car.SENT)
+    check_read_only(sim_car.SENT)
 
 
 def test_discovers_all_schemes(tmp_path, capsys):
     text, _, data = run(tmp_path, capsys)
-    assert "11-bit VAG   3 module(s)" in text
+    assert "11-bit VAG   4 module(s)" in text
     assert "29-bit VAG   1 module(s)" in text
     assert "29-bit OBD   2 module(s)" in text
     names = {scan.module_title(m) for m in data["modules"]}
@@ -210,3 +239,62 @@ def test_target_by_hex(tmp_path, capsys):
     assert "0X05A250 FOUND in 1 module(s)" in text
     ebkv = next(m for m in data["modules"] if m["tx"] == 0x73B)
     assert ebkv["dtcs"][0]["target"] is True
+
+
+def test_snapshot_by_record_number_when_ff_refused(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys, "--details")
+    esc = next(m for m in data["modules"] if m["tx"] == 0x713)
+    d = next(d for d in esc["dtcs"] if d["code"] == "9766144")
+    assert d["snapshot_records"] == {"01": "59049505000901" + "010c30"}
+    assert "snapshot 01: 59049505000901010c30" in text
+    assert esc["snapshot_ids"] is None          # 19 03 refused, records 01/02 tried
+
+
+def test_engine_snapshot_needs_extended_session(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys, "--target", "29244")
+    eng = next(m for m in data["modules"] if m["tx"] == 0x17FC0076)
+    d = eng["dtcs"][0]
+    assert eng["snapshot_ids"] == [["00723c", 1]]
+    assert "snapshot_records" not in d and d["snapshot"].startswith("error")
+
+
+def test_extended_session_reads_engine_snapshot(tmp_path, capsys):
+    text, _, data = run(tmp_path, capsys, "--target", "29244", "--extended-session")
+    assert "Extended session: allowed" in text
+    eng = next(m for m in data["modules"] if m["tx"] == 0x17FC0076)
+    d = eng["dtcs"][0]
+    assert d["snapshot_session"] == "extended" and d["extended_session"] == "used"
+    assert d["snapshot_records"]["01"].startswith("590400723c2f01")
+    assert "(read in extended session)" in text
+    sent = [p for ext, arb, p in sim_car.SENT if arb == 0x17FC0076]
+    assert sent.index(b"\x10\x03") < sent.index(b"\x10\x01")
+    check_read_only(sim_car.SENT)
+
+
+def test_extended_session_not_used_with_engine_running(tmp_path, capsys):
+    sim_car.RPM = 750
+    text, _, _ = run(tmp_path, capsys, "--details", "--extended-session")
+    assert "Extended session: not used" in text and "rpm 750" in text
+    assert not any(p[0] == 0x10 for _, _, p in sim_car.SENT)
+
+
+def test_extended_session_not_used_when_moving(tmp_path, capsys):
+    sim_car.SPEED = 12
+    text, _, _ = run(tmp_path, capsys, "--details", "--extended-session")
+    assert "speed 12" in text
+    assert not any(p[0] == 0x10 for _, _, p in sim_car.SENT)
+
+
+def test_extended_session_not_used_when_speed_unknown(tmp_path, capsys):
+    sim_car.MODS[(True, 0x18DA01F1)]["engine"] = False   # no ECU reports rpm or speed
+    text, _, _ = run(tmp_path, capsys, "--details", "--extended-session")
+    assert "Extended session: not used" in text
+    assert not any(p[0] == 0x10 for _, _, p in sim_car.SENT)
+
+
+def test_airbag_never_switched(tmp_path, capsys):
+    _, _, data = run(tmp_path, capsys, "--details", "--extended-session")
+    bag = next(m for m in data["modules"] if m["tx"] == 0x715)
+    assert bag["dtcs"][0]["snapshot"].startswith("error")
+    assert "extended_session" not in bag["dtcs"][0]
+    assert not any(arb == 0x715 and p[0] == 0x10 for _, arb, p in sim_car.SENT)

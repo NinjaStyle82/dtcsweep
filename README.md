@@ -34,7 +34,7 @@ dtcsweep checks four address schemes in a few seconds and reads everything that 
 - **Odometer and check engine light counters.** Odometer, distance and time driven with the light on, and distance and time since codes were cleared, at the top of every scan; `diff` shows the distance driven between scans.
 - **Battery check.** Module supply voltage is read at the start and end of every scan, with a warning when it's low, and with whether the engine is running. `--min-voltage 12.2` refuses to scan below a threshold.
 - **Extended data decoded.** For VW's common extended data record, dtcsweep shows how many times a fault was seen, its reset counter, and the mileage when it was last recorded (layout worked out against VCDS on the test car).
-- **Target hunting:** `--target 369232` (or `0x05A250`, or `U3001` for OBD lists) flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04).
+- **Target hunting:** `--target 369232` (or `0x05A250`, or `U3001` for OBD lists) flags one code wherever it appears and pulls its extended data (UDS 19 06) and snapshot (19 04). Refused snapshots are retried by record number, and, if you opt in with `--extended-session`, in the extended diagnostic session.
 - **Readable output.** Faults are color-coded by severity, there's a summary table, and a `.log` (plain text) and `.json` (all raw bytes) are written alongside.
 - **Your own VCDS descriptions.** `dtcsweep.py import-vcds Log.txt` reads a VCDS Auto-Scan you made and shows its descriptions next to your codes, stored only on your machine.
 - **Scan diff.** `dtcsweep.py diff OLD.json NEW.json` shows what changed between two scans: new and cleared codes, status changes, check engine light and readiness changes, software updates, and byte-level changes in extended data.
@@ -152,6 +152,7 @@ python3 dtcsweep.py [options]
   --slow             also probe silent addresses with a real DTC request
   --probe SECONDS    timeout per --slow probe (default 0.25)
   --redact           mask the VIN in all output
+  --extended-session retry refused snapshots in the extended session (engine off, stationary only; see below)
   --min-voltage V    refuse to scan if module voltage is below V (e.g. 12.2)
   --out-dir DIR      where to write the .log and .json (default: current dir)
   --fd               send CAN FD frames (needs an FD-capable adapter and firmware)
@@ -214,10 +215,19 @@ dtcsweep sends only these services:
 |---|---|
 | `0x3E 00` | TesterPresent (discovery ping) |
 | `0x22` | ReadDataByIdentifier (identity) |
-| `0x19 02 / 04 / 06` | ReadDTCInformation (list, snapshot, extended data) |
+| `0x19 02 / 03 / 04 / 06` | ReadDTCInformation (list, snapshot list, snapshot, extended data) |
 | OBD `0x01`, `0x02`, `0x03`, `0x07`, `0x09`, `0x0A` | Standard OBD-II reads |
 
-It never sends session changes, security access, clear-DTC (`0x14`), writes (`0x2E`), routines (`0x31`) or resets (`0x11`). A test (`tests/test_scan.py::test_read_only_guarantee`) records every request during a simulated scan and fails if anything outside this list appears. Please keep that test passing in any contribution.
+It never sends security access, clear-DTC (`0x14`), writes (`0x2E`), I/O control (`0x2F`), routines (`0x31`), resets (`0x11`) or communication control (`0x28`). A test (`tests/test_scan.py::test_read_only_guarantee`) records every request during a simulated scan and fails if anything outside this list appears. Please keep that test passing in any contribution.
+
+**One opt-in exception: `--extended-session`.** Some modules only hand over snapshots (the conditions recorded when a fault was set, like supply voltage) in the extended diagnostic session. With this flag, dtcsweep switches such a module to that session (`0x10 03`), reads only the snapshot, and switches it straight back (`0x10 01`). Nothing is written, coded or cleared, and modules drop back to the normal session by themselves within seconds anyway. Guard rails:
+
+- only if, at the start of the scan, the engine reports 0 rpm and the car reports 0 km/h; otherwise the flag is ignored with a message
+- only for a snapshot the module refused in the normal session
+- never the airbag module, and never the programming session (`0x10 02`)
+- a second test (`test_read_only_guarantee_with_extended_session`) fails if any other session is sent, if anything but snapshot reads happen inside it, or if a module isn't switched back
+
+Use it with the ignition on and the engine off. Some modules may still refuse; that's reported and harmless.
 
 Read-only describes what dtcsweep *asks for*. It doesn't make physical-layer mistakes harmless: use the right bitrate (500 kbit/s classic CAN on the test car), keep termination off, and keep sessions short.
 

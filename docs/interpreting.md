@@ -132,7 +132,7 @@ Source and confidence: one module on one car, checked against a third-party tool
 
 Here the warning lamp request cleared (status byte), the fault was seen once more, and the reset counter dropped by one. Scans over time are also how to work out byte 9 and the date layout.
 
-Many modules refuse snapshots (`19 04`) in the default diagnostic session and answer NRC `0x12`. This scanner doesn't open other sessions, to stay strictly read-only.
+**Snapshots** (`19 04`) record the conditions when a fault was set, such as supply voltage, ignition state and speed. They're the best evidence for faults like improper shutdowns. Many modules refuse a request for all snapshots at once (NRC `0x12`), so dtcsweep then asks which snapshot records the module has (`19 03`) and reads those one by one, or tries records 01 and 02 if the module won't say. Some modules only answer in the extended diagnostic session; `--extended-session` covers those, with the guard rails described in the README. Snapshots print as raw hex, one line per record, marked `(read in extended session)` where that was needed. Their layout isn't decoded yet; comparing them with a VCDS freeze frame for the same fault is how to work it out.
 
 ## Negative response codes
 

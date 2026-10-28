@@ -5,6 +5,10 @@ SocketCAN. Built for MQB / MQB-Evo platforms; tested on a 2026 VW Golf R (Mk8.5)
 
 READ-ONLY: uses only TesterPresent (0x3E, discovery), ReadDataByIdentifier
 (0x22), ReadDTCInformation (0x19) and the OBD read services 0x01/0x03/0x07/0x0A.
+The one exception is opt-in: --extended-session switches a module to the
+extended diagnostic session (10 03) just long enough to read a snapshot it
+refused, then back (10 01), only with the engine off and the car stationary,
+and never on the airbag module.
 Nothing is cleared, coded, adapted or written.
 
 WHAT IT DOES
@@ -34,6 +38,8 @@ USEFUL OPTIONS
   --schemes 11vag,29obd   limit which address schemes are swept
   --slow           also probe silent addresses with a real 19 02 request
   --fd             CAN FD frames (needs an FD-capable interface/firmware)
+  --extended-session  read refused snapshots in the extended session (10 03,
+                   then back to 10 01); engine off and stationary only
   --redact         mask the VIN in output (use before sharing logs)
   --out-dir DIR    where to write the .log and .json (default: current dir)
   --no-color       plain output
@@ -538,13 +544,74 @@ def read_dtcs(stack, mod, mask):
     mod["dtcs"] = []
 
 
-def read_details(stack, dtc):
-    b = bytes.fromhex(dtc["raw"])
-    for sub, key in ((0x04, "snapshot"), (0x06, "extended")):
+def read_snapshot_ids(stack, mod):
+    """19 03: the (DTC, record number) pairs a module holds snapshots for.
+    Cached per module; None if the module refuses the request."""
+    if "snapshot_ids" not in mod:
         try:
-            dtc[key] = uds(stack, [0x19, sub, *b, 0xFF], timeout=3.0).hex()
+            body = uds(stack, [0x19, 0x03], timeout=2.0)[2:]
+            mod["snapshot_ids"] = [[body[i:i + 3].hex(), body[i + 3]]
+                                   for i in range(0, len(body) - 3, 4)]
         except UdsError as e:
-            dtc[key] = f"error: {e}"
+            mod["snapshot_ids"] = None
+            mod.setdefault("notes", []).append(f"snapshot list (19 03): {e}")
+    return mod["snapshot_ids"]
+
+
+def read_snapshots(stack, mod, dtc):
+    """19 04 for one DTC: all records at once (FF) first. If that's refused,
+    the record numbers the module lists (19 03), or records 01 and 02 if it
+    won't list them. True if any snapshot was read."""
+    b = bytes.fromhex(dtc["raw"])
+    try:
+        dtc["snapshot"] = uds(stack, [0x19, 0x04, *b, 0xFF], timeout=3.0).hex()
+        return True
+    except UdsError as e:
+        dtc["snapshot"] = f"error: {e}"
+    ids = read_snapshot_ids(stack, mod)
+    records = [r for raw, r in ids if raw == dtc["raw"]] if ids is not None else [0x01, 0x02]
+    got = {}
+    for r in records:
+        try:
+            got[f"{r:02X}"] = uds(stack, [0x19, 0x04, *b, r], timeout=3.0).hex()
+        except UdsError:
+            pass
+    if got:
+        dtc["snapshot_records"] = got
+    return bool(got)
+
+
+def is_airbag(mod):
+    return (not mod["ext"] and mod["tx"] == 0x715) or "airbag" in module_title(mod).lower()
+
+
+def read_details(stack, mod, dtc, extended_ok=False):
+    """Snapshot (19 04) and extended data (19 06) for one DTC. With
+    extended_ok, a refused snapshot is retried in the extended session:
+    10 03, the 19 04 reads, then always 10 01. Never on the airbag module."""
+    if not read_snapshots(stack, mod, dtc) and extended_ok and not is_airbag(mod):
+        try:
+            uds(stack, [0x10, 0x03], timeout=2.0)
+        except UdsError as e:
+            dtc["extended_session"] = f"refused: {e}"
+        else:
+            try:
+                dtc["extended_session"] = "used"
+                mod.pop("snapshot_ids", None)      # the list may be longer in this session
+                if read_snapshots(stack, mod, dtc):
+                    dtc["snapshot_session"] = "extended"
+            finally:
+                try:
+                    uds(stack, [0x10, 0x01], timeout=2.0)
+                except UdsError as e:
+                    mod.setdefault("notes", []).append(
+                        f"could not return to the default session ({e}); "
+                        "modules drop back by themselves within seconds")
+    b = bytes.fromhex(dtc["raw"])
+    try:
+        dtc["extended"] = uds(stack, [0x19, 0x06, *b, 0xFF], timeout=3.0).hex()
+    except UdsError as e:
+        dtc["extended"] = f"error: {e}"
     decoded = decode_vw_extended(dtc["extended"])
     if decoded:
         dtc["extended_decoded"] = decoded
@@ -748,9 +815,16 @@ def print_module(mod, show_all):
         out(f"  {marker} {code}  {status}  {', '.join(d['labels'])}{flag}")
         if d.get("vcds"):
             out(f"      {dim('[your VCDS import]')} {vcds_text(d)}")
-        for key in ("snapshot", "extended"):
-            if key in d:
-                out(f"      {dim(key + ':')} {d[key]}")
+        via = dim("  (read in extended session)") if d.get("snapshot_session") == "extended" else ""
+        if d.get("snapshot_records"):
+            for r, h in d["snapshot_records"].items():
+                out(f"      {dim('snapshot ' + r + ':')} {h}{via}")
+        elif "snapshot" in d:
+            out(f"      {dim('snapshot:')} {d['snapshot']}{via}")
+        if d.get("extended_session", "").startswith("refused"):
+            out(f"      {dim('extended session ' + d['extended_session'])}")
+        if "extended" in d:
+            out(f"      {dim('extended:')} {d['extended']}")
         if d.get("extended_decoded"):
             out(f"      {dim('decoded (VW layout, from a VCDS comparison):')} "
                 f"{extended_text(d['extended_decoded'])}")
@@ -1043,6 +1117,11 @@ def diff_module(old, new):
                 lines.append(dim(f"              new {' '.join(y[i:i+2] for i in range(0, len(y), 2))}"))
             else:
                 lines.append(yellow(f"~ {b['code']:<9}") + f" {key:<9} {x} → {y}")
+        ra, rb = a.get("snapshot_records") or {}, b.get("snapshot_records") or {}
+        for r in sorted(ra.keys() & rb.keys()):
+            if ra[r] != rb[r]:
+                ch = ", ".join(f"[{i}] {_hx(p)}→{_hx(q)}" for i, p, q in byte_changes(ra[r], rb[r]))
+                lines.append(yellow(f"~ {b['code']:<9}") + f" snapshot {r} bytes {ch}")
         xa, xb = decode_vw_extended(a.get("extended")), decode_vw_extended(b.get("extended"))
         if xa and xb:
             parts = [f"{label} {xa[k]} → {xb[k]}" for k, label in (
@@ -1194,6 +1273,10 @@ def main(argv=None):
                     help="also probe silent addresses with a real 19 02")
     ap.add_argument("--probe", type=float, default=0.25, help="timeout per --slow probe")
     ap.add_argument("--redact", action="store_true", help="mask the VIN in all output")
+    ap.add_argument("--extended-session", action="store_true",
+                    help="retry refused snapshots in the extended diagnostic session "
+                         "(10 03, then 10 01); only with the engine off and the car "
+                         "stationary, never on the airbag module")
     ap.add_argument("--min-voltage", type=float, default=None,
                     help="refuse to scan if module voltage is below this (e.g. 12.0)")
     ap.add_argument("--out-dir", default=".", help="directory for .log/.json output")
@@ -1241,6 +1324,19 @@ def main(argv=None):
             return
         distances = read_distances(bus, keys, args.fd)
         print_distances(distances)
+        extended_ok = False
+        if args.extended_session:
+            speeds = functional_pid(bus, keys, args.fd, 0x0D, nbytes=1)
+            speed = max(speeds) if speeds else None
+            rpm = engine["start"]
+            if rpm == 0 and speed == 0:
+                extended_ok = True
+                out(dim("  Extended session: allowed for refused snapshots "
+                        "(engine off, stationary; airbag module excluded)"))
+            else:
+                out(yellow(f"  Extended session: not used. It needs the engine off and the car "
+                           f"stationary (rpm {rpm if rpm is not None else 'unknown'}, "
+                           f"speed {speed if speed is not None else 'unknown'})."))
         out()
         rule("DISCOVERY")
         found = discover(bus, keys, args.fd)
@@ -1280,9 +1376,9 @@ def main(argv=None):
                                    or (target.get("sae") and sae.startswith(target["sae"]))):
                         d["target"] = True
                         hits.append((mod, d))
-                        read_details(stack, d)
+                        read_details(stack, mod, d, extended_ok)
                     elif args.details and d["severity"] in ("active", "confirmed"):
-                        read_details(stack, d)
+                        read_details(stack, mod, d, extended_ok)
                 if mod["obd"]:
                     code = target.get("sae") if target else None
                     mod["_target_code"] = code
