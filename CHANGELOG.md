@@ -6,6 +6,7 @@
 - Battery voltage check at the start and end of each scan, with `--min-voltage` to refuse low-voltage scans; engine running/off (OBD PID 0C) shown alongside, and `diff` notes when it differs between scans
 - Odometer (OBD PID A6) and check engine light counters (PIDs 21, 4D, 31, 4E) at the top of each scan, compared by `diff`
 - `diff` command to compare two scans, including byte-level extended data changes
+- VW extended data record 01 decoded (priority, times seen, reset counter, mileage), with decoded changes in `diff`
 - VW module codes are shown as VW fault numbers (e.g. `369232 [05A250]`, as VCDS shows them) instead of SAE-style codes, which were misleading for VW-internal numbering; `--target` accepts the number or its hex
 - OBD-only ECUs are labelled as such instead of "read failed"
 

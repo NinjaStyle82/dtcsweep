@@ -21,8 +21,10 @@ def _mods():
         # 11-bit VAG: brake booster holding the target code in UDS form
         (False, 0x73B): dict(rx=0x7A5, name=b"EBKV", part=b"5WA909059XX", sw=b"0563",
                              dtcs=[(b"\x05\xA2\x50", 0xA8)],
-                             # extended data after the status byte: rec 01 = 02, rec 06 = 02 28
-                             ext=bytes([0x01, 0x02, 0x06, 0x02, 0x28])),
+                             # extended data after the status byte, as read from the test car:
+                             # record 01, priority 2, seen 6 times, ?, reset counter 40,
+                             # mileage 374 km, blank date/time
+                             ext=bytes([0x01, 0x02, 0x06, 0x02, 0x28, 0x00, 0x01, 0x76]) + bytes(6)),
         # 29-bit VAG: engine
         (True, 0x17FC0076): dict(rx=0x17FE0076, name=b"R4 2.0l TFS", part=b"5WA906259XX",
                                  dtcs=[(b"\x00\x72\x3C", 0x2F)]),

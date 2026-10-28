@@ -19,9 +19,10 @@ def diff(capsys, old, new):
 
 def change_the_car():
     m = sim_car.MODS
-    # brake booster: fault recurs (counter 02 -> 03), lamp request clears, module reflashed
+    # brake booster: fault recurs (seen 6 -> 7 times), reset counter 40 -> 39,
+    # lamp request clears, module reflashed
     ebkv = m[(False, 0x73B)]
-    ebkv["ext"] = bytes([0x01, 0x03, 0x06, 0x02, 0x27])
+    ebkv["ext"] = bytes([0x01, 0x02, 0x07, 0x02, 0x27, 0x00, 0x01, 0x76]) + bytes(6)
     ebkv["dtcs"] = [(b"\x05\xA2\x50", 0x28)]
     ebkv["sw"] = b"0571"
     # ESC: one fault cleared, a new one appears
@@ -45,8 +46,8 @@ def test_diff_reports_every_kind_of_change(tmp_path, capsys):
     assert "- Module not answering: MEM-FS [0x74C]" in text
     assert "~ Software 0563 → 0571" in text
     assert "~ 369232    status    0xA8 → 0x28  (-warning lamp)" in text
-    # occurrence-style counter 02 -> 03 and healing-style counter 28 -> 27
-    assert "~ 369232    extended  bytes [5] A8→28, [7] 02→03, [10] 28→27" in text
+    assert "~ 369232    extended  bytes [5] A8→28, [8] 06→07, [10] 28→27" in text
+    assert "~ 369232    decoded   times seen 6 → 7, reset counter 40 → 39" in text
     assert "+ 4268800   new" in text
     assert "- 9766144   gone" in text
     assert "- U3001     OBD permanent (cleared)" in text

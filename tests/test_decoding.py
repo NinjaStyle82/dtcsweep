@@ -79,3 +79,17 @@ def test_monitor_status_incomplete_continuous_and_diesel():
 def test_assess_voltage(volts, level):
     assert scan.assess_voltage(volts)[0] == level
 
+
+
+def test_decode_vw_extended_matches_vcds():
+    # Real 19 06 reply from the test car's brake booster; VCDS showed priority 2,
+    # frequency 6, mileage 374 km and a blank date for the same fault.
+    x = scan.decode_vw_extended("590605a250a80102060228000176000000000000")
+    assert x == {"priority": 2, "frequency": 6, "unknown_9": 2, "reset_counter": 40,
+                 "mileage_km": 374, "datetime_raw": None}
+
+
+@pytest.mark.parametrize("bad", ["590605a250a801020602", "590405a250a8010206022800017600000000000",
+                                  "error: NRC 0x12", None])
+def test_decode_vw_extended_ignores_other_shapes(bad):
+    assert scan.decode_vw_extended(bad) is None

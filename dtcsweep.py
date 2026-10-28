@@ -542,6 +542,36 @@ def read_details(stack, dtc):
             dtc[key] = uds(stack, [0x19, sub, *b, 0xFF], timeout=3.0).hex()
         except UdsError as e:
             dtc[key] = f"error: {e}"
+    decoded = decode_vw_extended(dtc["extended"])
+    if decoded:
+        dtc["extended_decoded"] = decoded
+
+
+def decode_vw_extended(hex_resp):
+    """VW extended data record 01 from a 19 06 reply, or None if it doesn't
+    have that shape. Layout worked out by comparing our bytes with a VCDS
+    freeze frame for the same fault (one car, one module so far):
+
+      [6] 01 record number   [7] priority      [8] frequency (times seen)
+      [9] unknown            [10] reset counter (counts down while the fault
+      stays away)            [11-13] mileage, km   [14-19] date/time (blank
+      in the one sample; layout not confirmed, so kept raw)."""
+    try:
+        b = bytes.fromhex(hex_resp)
+    except (TypeError, ValueError):
+        return None
+    if len(b) < 20 or b[0] != 0x59 or b[1] != 0x06 or b[6] != 0x01:
+        return None
+    stamp = b[14:20]
+    return {"priority": b[7], "frequency": b[8], "unknown_9": b[9],
+            "reset_counter": b[10], "mileage_km": int.from_bytes(b[11:14], "big"),
+            "datetime_raw": None if not any(stamp) else stamp.hex()}
+
+
+def extended_text(x):
+    when = "date not set" if x["datetime_raw"] is None else f"date bytes {x['datetime_raw']}"
+    return (f"priority {x['priority']}  ·  seen {x['frequency']} times  ·  "
+            f"reset counter {x['reset_counter']}  ·  at {km_text(x['mileage_km'])}  ·  {when}")
 
 
 CONTINUOUS_MONITORS = ["misfire", "fuel system", "components"]
@@ -716,6 +746,9 @@ def print_module(mod, show_all):
         for key in ("snapshot", "extended"):
             if key in d:
                 out(f"      {dim(key + ':')} {d[key]}")
+        if d.get("extended_decoded"):
+            out(f"      {dim('decoded (VW layout, from a VCDS comparison):')} "
+                f"{extended_text(d['extended_decoded'])}")
     info = mod.get("obd_info")
     if info:
         for key, label in (("ecu_name", "OBD name"), ("cal_id", "Cal ID"), ("vin", "VIN")):
@@ -871,6 +904,14 @@ def diff_module(old, new):
                 lines.append(dim(f"              new {' '.join(y[i:i+2] for i in range(0, len(y), 2))}"))
             else:
                 lines.append(yellow(f"~ {b['code']:<9}") + f" {key:<9} {x} → {y}")
+        xa, xb = decode_vw_extended(a.get("extended")), decode_vw_extended(b.get("extended"))
+        if xa and xb:
+            parts = [f"{label} {xa[k]} → {xb[k]}" for k, label in (
+                ("frequency", "times seen"), ("reset_counter", "reset counter"),
+                ("priority", "priority"), ("mileage_km", "mileage km"),
+                ("datetime_raw", "date bytes")) if xa[k] != xb[k]]
+            if parts:
+                lines.append(yellow(f"~ {b['code']:<9}") + f" decoded   {', '.join(parts)}")
 
     # OBD lists
     oo, no = old.get("obd_dtcs") or {}, new.get("obd_dtcs") or {}

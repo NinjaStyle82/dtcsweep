@@ -76,6 +76,14 @@ def test_target_in_uds_pulls_extended_data(tmp_path, capsys):
     assert dtc["target"] is True
     assert dtc["extended"].startswith("590605a250a8")
     assert dtc["snapshot"].startswith("error")
+    assert dtc["extended_decoded"]["frequency"] == 6
+    assert dtc["extended_decoded"]["mileage_km"] == 374
+
+
+def test_extended_data_decoded_in_output(tmp_path, capsys):
+    text, _, _ = run(tmp_path, capsys, "--target", "369232")
+    assert ("priority 2  ·  seen 6 times  ·  reset counter 40  ·  "
+            "at 374 km (232 mi)  ·  date not set") in text
 
 
 def test_no_target_lists_notable_faults(tmp_path, capsys):

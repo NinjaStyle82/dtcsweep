@@ -101,22 +101,36 @@ The freeze frame records values at the moment the fault was detected. Two things
 
 ## Extended data and snapshots (UDS 19 06 / 19 04)
 
-These are printed as raw hex, for example:
+These are printed as raw hex. VW's extended data record 01 has a layout we worked out by comparing the test car's bytes with a VCDS freeze frame for the same fault, so dtcsweep also prints it decoded:
 
 ```
-59 06 | 05 A2 50 | A8 | 01 02 | 06 02 28 00 01 76 ...
-reply   DTC        status  record 01   record 06 ...
+      extended: 590605a250a80102060228000176000000000000
+      decoded (VW layout, from a VCDS comparison): priority 2  ·  seen 6 times  ·  reset counter 40  ·  at 374 km (232 mi)  ·  date not set
 ```
 
-The record numbers and field layouts come from VW's diagnostic database and are **not self-describing**. Common contents include an occurrence counter, a healing (aging) counter (often counting toward 40), and mileage or a timestamp. Treat any byte-level reading as a guess unless a VW-aware tool confirms it.
+| Byte | Meaning |
+|---|---|
+| 0–1 | `59 06`, the reply to "read extended data" |
+| 2–4 | the DTC (VW fault number) |
+| 5 | its status byte |
+| 6 | record number `01` |
+| 7 | priority (VW's ranking; lower is more important) |
+| 8 | frequency: how many times the fault has been seen |
+| 9 | unknown |
+| 10 | reset counter: counts down while the fault stays away; the code can be erased when it runs out |
+| 11–13 | mileage in km when the fault was last recorded |
+| 14–19 | date and time; blank in the only sample, so the layout isn't confirmed and dtcsweep shows these bytes raw |
 
-To work out what a record means, compare scans over time with `dtcsweep.py diff`. It prints the index of every byte that changed, counting from the start of the response (byte 0 is `0x59`, bytes 2–4 are the DTC, byte 5 is its status). For example:
+Source and confidence: one module on one car, checked against a third-party tool (VCDS). It's printed only when the reply has exactly this shape. Other modules may use other layouts, so check the decoded values against a VW-aware tool before relying on them.
+
+`dtcsweep.py diff` prints the index of every byte that changed (byte 0 is `0x59`) and, for decodable records, the decoded changes:
 
 ```
-~ 369232    extended  bytes [5] A8→28, [7] 02→03, [10] 28→27
+~ 369232    extended  bytes [5] A8→28, [8] 06→07, [10] 28→27
+~ 369232    decoded   times seen 6 → 7, reset counter 40 → 39
 ```
 
-Here byte 5 is the status (warning lamp request cleared), byte 7 went up by one when the fault recurred (an occurrence counter is a good guess), and byte 10 went down by one (a healing counter counting drive cycles is a good guess). Several scans that agree turn a guess into a finding.
+Here the warning lamp request cleared (status byte), the fault was seen once more, and the reset counter dropped by one. Scans over time are also how to work out byte 9 and the date layout.
 
 Many modules refuse snapshots (`19 04`) in the default diagnostic session and answer NRC `0x12`. This scanner doesn't open other sessions, to stay strictly read-only.
 
